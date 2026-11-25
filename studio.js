@@ -160,6 +160,11 @@ function roomFromHash() {
 
 async function openRoom(createBlank) {
   const epoch = ++state.epoch;
+  if (window.qreaseeAuth) {
+    const session = await window.qreaseeAuth.ready;
+    if (state.epoch !== epoch || !session) return;
+    state.name = window.qreaseeAuth.displayName.slice(0, 32);
+  }
   state.busy = false;
   state.room = '';
   state.doc = null;
