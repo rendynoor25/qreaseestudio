@@ -1196,8 +1196,8 @@ canvas.addEventListener('pointermove',event=>{
   state.inference=null;
   const dx=point[0]-drag.start[0], dy=point[1]-drag.start[1];
   if (drag.tool==='orbit') {
-    camera.yaw=drag.camera.yaw+dx*.009;
-    camera.pitch=clamp(drag.camera.pitch+dy*.008,-Math.PI/2+.02,Math.PI/2-.02);
+    camera.yaw=drag.camera.yaw-dx*.009;
+    camera.pitch=clamp(drag.camera.pitch-dy*.008,-Math.PI/2+.02,Math.PI/2-.02);
     if (!camera.perspective) $('#camera').value='iso';
   } else if (drag.tool==='pan') {
     camera.x=drag.camera.x+dx;
