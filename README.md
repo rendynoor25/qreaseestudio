@@ -68,6 +68,8 @@ Untuk build demo lintas internet, set `QREASEE_CLOUD_DEMO=1`, `NEXT_PUBLIC_SUPAB
 
 Qreasee saat ini bukan aplikasi Next.js, jadi helper SSR dan middleware Next.js tidak dipakai. Klien demo memanggil Supabase REST RPC langsung dari browser.
 
+Demo cloud publik tersedia di [GitHub Pages](https://rendynoor25.github.io/qreaseestudio/). Untuk publikasi ulang, jalankan build cloud lalu unggah tujuh aset di `dist` ke cabang `gh-pages`. Path aset pada build memakai direktori situs saat ini sehingga tautan Pages dapat dibuka dari `/qreaseestudio/`. Jalankan `node scripts/test-cloud.cjs` untuk menguji sinkronisasi dua klien, konflik, dan penggabungan edit; tes ini membuat satu ruang kecil di Supabase.
+
 Tautan ruang memberikan izin edit kepada siapa pun yang memegangnya. Versi ini belum memiliki akun, peran pengguna, riwayat revisi yang bisa dipulihkan, atau pengujian beban produksi. Untuk ruang privat, batasi akses di depan server dan gunakan tautan langsung hanya untuk peserta yang dipercaya. Simpan cadangan direktori data jika model diperlukan di kemudian hari.
 
 Revisi dan posisi kursor diperiksa setiap 350 ms selama tab aktif. Perubahan geometri dibagikan setelah drag dilepas atau setelah nilai diterapkan. Edit pada objek yang berbeda bisa digabung, sedangkan edit dari versi lama pada objek atau lembar yang sama ditolak dan memuat keadaan terbaru. Undo/redo berlaku pada operasi sesi sendiri dan tunduk pada pemeriksaan konflik yang sama.

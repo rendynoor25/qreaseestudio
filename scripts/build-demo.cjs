@@ -14,10 +14,11 @@ if (fs.existsSync(envFile)) {
 }
 fs.mkdirSync(output, { recursive: true });
 const html = fs.readFileSync(path.join(root, 'web', 'index.html'), 'utf8')
+  .replace('href="/studio.css"', 'href="./studio.css"')
   .replace('<script src="/studio.js" defer></script>',
-    '<script src="/demo.js" defer></script>\n  ' +
-    (cloud ? '<script src="/cloud-config.js" defer></script>\n  <script src="/cloud.js" defer></script>\n  ' : '') +
-    '<script src="/studio.js" defer></script>');
+    '<script src="./demo.js" defer></script>\n  ' +
+    (cloud ? '<script src="./cloud-config.js" defer></script>\n  <script src="./cloud.js" defer></script>\n  ' : '') +
+    '<script src="./studio.js" defer></script>');
 fs.writeFileSync(path.join(output, 'index.html'), html);
 for (const name of ['studio.css', 'studio.js']) {
   fs.copyFileSync(path.join(root, 'web', name), path.join(output, name));

@@ -17,7 +17,7 @@ let demoSeed;
 
 async function seedDocument() {
   if (!demoSeed) {
-    demoSeed = fetch('/seed.json').then(response => {
+    demoSeed = fetch('./seed.json').then(response => {
       if (!response.ok) throw new Error('Contoh proyek tidak tersedia.');
       return response.json();
     });
