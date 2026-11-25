@@ -91,7 +91,14 @@ const clamp = (value,min,max) => Math.max(min,Math.min(max,value));
 const round = value => Math.round(value * 1000) / 1000;
 const snap = (value, step = .25) => Math.round(value / step) * step;
 const svgNS = 'http://www.w3.org/2000/svg';
-const status = message => { $('#status').textContent = message; };
+let statusTimer;
+const status = message => {
+  const label=$('#status');
+  label.textContent=message;
+  label.hidden=message==='Ruang model siap.';
+  clearTimeout(statusTimer);
+  if (!label.hidden) statusTimer=setTimeout(()=>{label.hidden=true;},5000);
+};
 const objects = () => state.doc?.objects || [];
 const members = id => objects().filter(object => object.container?.id === id);
 const onlySelected = () => state.selected.size===1 ? state.selected.values().next().value : null;

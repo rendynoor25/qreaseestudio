@@ -22,7 +22,10 @@
     </div>
   </div>
   <header class="app-header">
-    <div class="identity" aria-label="Qreasee"><img class="brand-logo" src="./qreasee-logo.png" alt="Qreasee"></div>
+    <div class="identity" aria-label="Qreasee">
+      <img class="brand-logo dark-logo" src="./qreasee-logo.png" alt="Qreasee">
+      <img class="brand-logo light-logo" src="./qreasee-logo-black.png" alt="" aria-hidden="true">
+    </div>
     <div class="project">
       <span data-icon="folder" aria-hidden="true"></span>
       <strong id="project-title">Qreasee</strong>
@@ -47,6 +50,7 @@
     <div class="collaboration">
       <label class="header-search"><span data-icon="search"></span><input id="search" type="search" placeholder="Cari objek" aria-label="Cari objek"></label>
       <button class="header-tool" id="theme-toggle" title="Ganti tema" aria-label="Ganti tema" data-icon="moon"></button>
+      <span id="connection"><i></i><span>Menghubungkan</span></span>
       <div class="avatars" id="avatars" aria-label="Editor aktif"></div>
       <button class="header-tool" id="inspector-toggle" title="Tampilkan properti" aria-label="Tampilkan properti" aria-expanded="false" aria-controls="inspector" data-icon="sliders"></button>
       <button class="share" id="share"><span data-icon="users"></span> Bagikan</button>
@@ -84,8 +88,8 @@
         <div class="orientation" id="orientation" aria-label="Arah sumbu"></div>
       </div>
       <div class="stage-bottom">
-        <div class="hint-stack"><span id="tool-hint"></span><span id="snap-feedback" aria-live="off"></span></div>
-        <div class="grid-control"><button id="zoom-out" title="Perkecil" aria-label="Perkecil" data-icon="minus"></button><span id="zoom-label">100%</span><button id="zoom-in" title="Perbesar" aria-label="Perbesar" data-icon="plus"></button></div>
+        <div class="hint-stack"><span id="tool-hint"></span><span id="snap-feedback" aria-live="off"></span><span id="status" role="status">Membuka proyek…</span></div>
+        <div class="stage-metrics"><span id="coordinates">X — &nbsp; Y —</span><label class="unit-control">Satuan <select id="unit-select" aria-label="Satuan panjang"><option value="m">m</option><option value="cm">cm</option><option value="mm">mm</option></select></label><div class="grid-control"><button id="zoom-out" title="Perkecil" aria-label="Perkecil" data-icon="minus"></button><span id="zoom-label">100%</span><button id="zoom-in" title="Perbesar" aria-label="Perbesar" data-icon="plus"></button></div></div>
       </div>
     </section>
     <section class="stage layout-stage" id="layout-stage" aria-label="Pratinjau lembar gambar" hidden>
@@ -148,7 +152,7 @@
       </div>
     </aside>
   </main>
-  <footer><span id="status">Membuka proyek…</span><span id="connection"><i></i><span>Menghubungkan</span></span><span id="revision"></span><label class="unit-control">Satuan <select id="unit-select" aria-label="Satuan panjang"><option value="m">m</option><option value="cm">cm</option><option value="mm">mm</option></select></label><span id="coordinates">X — &nbsp; Y —</span></footer>
+  <span id="revision" hidden></span>
   <dialog id="share-dialog">
     <form method="dialog" class="dialog-head"><h2>Bagikan proyek</h2><button aria-label="Tutup" data-icon="close"></button></form>
     <p>Siapa pun dengan tautan ini dapat mengedit proyek di server yang sama.</p>
