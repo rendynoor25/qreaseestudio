@@ -78,7 +78,9 @@ const state = {
 };
 const canvas = $('#viewport');
 const ctx = canvas.getContext('2d');
-const camera = { yaw: .62, pitch: .48, axes:null, scale: 40, base: 40, x: 0, y: 0, center:[0,0,0], distance:22, perspective:true };
+const camera = { yaw: .62, pitch: .48, axes:null, scale: 40, base: 40, baseDistance:22,
+  x: 0, y: 0, center:[0,0,0], distance:22, perspective:true };
+const perspectiveFov = 35*Math.PI/180;
 const views = { perspective:[.62,.48], iso:[.62,.54], plan:[0,Math.PI/2], front:[0,0], right:[Math.PI/2,0] };
 const clamp = (value,min,max) => Math.max(min,Math.min(max,value));
 const round = value => Math.round(value * 1000) / 1000;
@@ -664,18 +666,37 @@ function bounds(points) {
   return {min,max};
 }
 
+function focalPixels(height=canvas.clientHeight || 500) {
+  return height/(2*Math.tan(perspectiveFov/2));
+}
+
 function fit() {
   const world = state.meshes.flatMap(mesh => mesh.vertices);
   if (!world.length) world.push([-6,-4,0],[6,4,0]);
   const box=bounds(world);
   camera.center=box.min.map((low,i)=>(low+box.max[i])/2);
-  camera.distance=Math.max(8, 1.75*Math.hypot(...box.max.map((high,i)=>high-box.min[i]))/2);
-  const points=world.map(projectPoint);
-  const {min,max} = bounds(points);
   const width = canvas.clientWidth || $('#layout-stage').clientWidth || 800;
   const height = canvas.clientHeight || 500;
-  camera.scale = clamp(Math.min(width*.69 / Math.max(1,max[0]-min[0]),
-    height*.63 / Math.max(1,max[1]-min[1])), .05, 300);
+  if (camera.perspective) {
+    const focal=focalPixels(height);
+    const [right,down,depth]=cameraAxes();
+    let distance=1;
+    for (const point of world) {
+      const relative=point.map((value,i)=>value-camera.center[i]);
+      const [u,v,d]=[right,down,depth].map(axis=>axis.reduce((sum,value,i)=>sum+value*relative[i],0));
+      distance=Math.max(distance,d+Math.abs(u)*focal/(width*.69/2),
+        d+Math.abs(v)*focal/(height*.63/2));
+    }
+    camera.distance=distance*1.05;
+    camera.scale=focal/camera.distance;
+    camera.baseDistance=camera.distance;
+  } else {
+    camera.distance=Math.max(8, 1.75*Math.hypot(...box.max.map((high,i)=>high-box.min[i]))/2);
+    const {min,max}=bounds(world.map(projectPoint));
+    camera.scale=clamp(Math.min(width*.69/Math.max(1,max[0]-min[0]),
+      height*.63/Math.max(1,max[1]-min[1])),.05,300);
+  }
+  const {min,max}=bounds(world.map(projectPoint));
   camera.base = camera.scale;
   camera.x = -(min[0]+max[0])/2*camera.scale;
   camera.y = -(min[1]+max[1])/2*camera.scale;
@@ -692,6 +713,19 @@ function cameraView(value) {
 }
 
 function zoom(factor,x=canvas.clientWidth/2,y=canvas.clientHeight/2) {
+  if (camera.perspective) {
+    const pivot=orbitPivot([x,y]);
+    const [,,depth]=cameraAxes();
+    const eye=camera.center.map((value,i)=>value+camera.distance*depth[i]);
+    const fromEye=Math.hypot(...eye.map((value,i)=>value-pivot[i]));
+    let ratio=clamp(1/factor,.1/camera.distance,100000/camera.distance);
+    if (ratio<1 && fromEye*ratio<.2) ratio=Math.min(1,.2/Math.max(fromEye,1e-9));
+    camera.center=pivot.map((value,i)=>value+ratio*(camera.center[i]-value));
+    camera.distance*=ratio;
+    camera.scale=focalPixels()/camera.distance;
+    redraw();
+    return;
+  }
   const before = camera.scale;
   camera.scale = clamp(camera.scale*factor,.02,750);
   const ratio = camera.scale / before;
@@ -709,7 +743,7 @@ function projectPoint(point) {
   const relative=point.map((value,i)=>value-camera.center[i]);
   const [u,v,d]=cameraAxes().map(axis=>axis.reduce((sum,value,i)=>sum+value*relative[i],0));
   const w=camera.perspective ? 1-d/camera.distance : 1;
-  return w>.025 ? [u/w,v/w,d/w,w] : [NaN,NaN,d,w];
+  return w>(camera.perspective ? .05/camera.distance : 0) ? [u/w,v/w,d/w,w] : [NaN,NaN,d,w];
 }
 
 function stagePoint(point) {
@@ -727,7 +761,7 @@ function ground([x,y], z=0) {
   if (camera.perspective) {
     depth=(z-camera.center[2]-vertical)/(depthAxis[2]-vertical/camera.distance);
     factor=1-depth/camera.distance;
-    if (!Number.isFinite(factor) || factor<=.025) return null;
+    if (!Number.isFinite(factor) || factor<=.05/camera.distance) return null;
   } else {
     if (Math.abs(depthAxis[2])<.03) return null;
     depth=(z-camera.center[2]-vertical)/depthAxis[2];
@@ -1009,7 +1043,8 @@ function draw() {
       ctx.stroke();
     }
   }
-  $('#zoom-label').textContent = Math.round(camera.scale / camera.base * 100) + '%';
+  $('#zoom-label').textContent = Math.round((camera.perspective
+    ? camera.baseDistance/camera.distance : camera.scale/camera.base)*100) + '%';
   for (const peer of state.peers) {
     if (peer.cursor?.mode!=='model') continue;
     const [x,y]=stagePoint([peer.cursor.x,peer.cursor.y,0]);
@@ -1225,7 +1260,7 @@ $('#snap-toggle').onclick=()=>setSnapping(!state.snapping);
 canvas.addEventListener('contextmenu',event=>event.preventDefault());
 canvas.addEventListener('wheel',event=>{
   event.preventDefault();
-  zoom(Math.exp(-clamp(event.deltaY,-400,400)*.0015),...pointer(event));
+  zoom(Math.exp(clamp(event.deltaY,-400,400)*.0015),...pointer(event));
 },{passive:false});
 canvas.addEventListener('pointerdown',event=>{
   if (state.drag || event.button > 2) return;
@@ -1508,7 +1543,10 @@ window.addEventListener('keydown',event=>{
   if (tool) setTool(tool[0]);
 });
 
-new ResizeObserver(redraw).observe(canvas);
+new ResizeObserver(()=>{
+  if (camera.perspective) camera.scale=focalPixels()/camera.distance;
+  redraw();
+}).observe(canvas);
 
 
 function drawSheet() {
