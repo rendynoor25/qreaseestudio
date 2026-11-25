@@ -947,6 +947,13 @@ function draw() {
       ctx.fillStyle='#703b11';ctx.fillText(label,(a[0]+b[0])/2,(a[1]+b[1])/2-4);
     }
   }
+  if (drag?.tool==='move' && drag.updates) {
+    const anchor=stagePoint([drag.anchor[0]+drag.delta[0],drag.anchor[1]+drag.delta[1],drag.elevation]);
+    if (Number.isFinite(anchor[0])) {
+      ctx.beginPath();ctx.arc(anchor[0],anchor[1],5,0,Math.PI*2);
+      ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#bf671c';ctx.lineWidth=2;ctx.stroke();
+    }
+  }
   if (drag?.tool==='rotate') {
     const pivot=stagePoint(drag.pivot);
     if (Number.isFinite(pivot[0])) {
@@ -1188,7 +1195,14 @@ canvas.addEventListener('pointermove',event=>{
   $('#coordinates').textContent=onGround ? 'X '+onGround[0].toFixed(2)+'  Y '+onGround[1].toFixed(2) : 'X —  Y —';
   const drag=state.drag;
   if (!drag) {
-    state.inference=['line','rectangle','circle'].includes(state.tool) ? drawingPoint(point) : null;
+    if (state.tool==='move') {
+      const hovered=pickFace(point,true)?.object;
+      const id=targetId(hovered);
+      const owned=new Set(members(id).length?members(id).map(item=>item.id):hovered?[hovered.id]:[]);
+      state.inference=owned.size ? infer(point,undefined,new Set(objects().filter(item=>!owned.has(item.id)).map(item=>item.id))) : null;
+    } else {
+      state.inference=['line','rectangle','circle','measure'].includes(state.tool) ? drawingPoint(point) : null;
+    }
     if (!state.inference?.label) state.inference=null;
     redraw();
     return;
@@ -1250,7 +1264,10 @@ canvas.addEventListener('pointermove',event=>{
     state.inference=infer(projected,drag.elevation,drag.owned);
     const delta=state.inference ? state.inference.world.slice(0,2).map((value,i)=>value-drag.anchor[i])
       : end.map((value,i)=>state.snapping?snap(value-drag.origin[i]):round(value-drag.origin[i]));
+    drag.delta=delta;
     drag.updates=drag.sources.map(object=>({...object,x:object.x+delta[0],y:object.y+delta[1]}));
+    status(state.inference ? 'Snap '+state.inference.label+' · X '+state.inference.world[0].toFixed(3)+'  Y '+state.inference.world[1].toFixed(3)
+      : 'Pindah · ΔX '+delta[0].toFixed(3)+'  ΔY '+delta[1].toFixed(3));
   } else {
     const a=drag.initial;
     const candidate=drawingPoint(point,a[2]);

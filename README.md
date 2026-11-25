@@ -21,7 +21,7 @@ cargo test --locked
 | Menggambar | Pilih Garis (L), Persegi panjang (R), atau Lingkaran (C). Klik dan tarik. Snap mencari ujung, titik tengah, dan tepi yang terlihat. Jika tidak ada titik terdekat, Snap memakai grid 0,25 m. Titik awal menentukan elevasi gambar. |
 | Membentuk bidang | Hubungkan garis hingga menutup loop pada elevasi yang sama. Klik bagian dalam untuk memilih bidang dan klik tepi untuk memilih garis. Bidang memiliki properti dan dapat di-Push/Pull. Menambahkan garis pembagi memecah bidang otomatis yang masih mengikuti garis sumber. |
 | Membuat volume | Gunakan Push/Pull (P) di tampilan 3D. Tarik bidang atas untuk mengatur tinggi dengan langkah 0,05 m saat Snap aktif. Tinggi juga bisa diisi langsung. |
-| Mengedit objek | Pilih objek di kanvas atau daftar. Isi nama, dimensi, posisi, sudut rotasi, dan warna melalui properti. Gunakan Move (M) untuk menggeser sejajar bidang dasar. |
+| Mengedit objek | Pilih objek di kanvas atau daftar. Isi nama, dimensi, posisi, sudut rotasi, dan warna melalui properti. Gunakan Move (M) untuk menggeser sejajar bidang dasar. Hover ujung atau titik tengah objek sebelum menarik untuk memilih titik pegangan; arahkan titik itu ke snap objek lain pada elevasi yang sama. |
 | Rotate | Pilih Rotate (Q) dan tarik mengelilingi pusat objek atau Group. Sudut positif di panel properti memutar berlawanan arah jarum jam pada denah. |
 | Skala | Pilih Skala (S), lalu tarik dari bagian objek atau Group di luar pusatnya. Ukuran dan tinggi berubah proporsional; Snap memakai langkah faktor 0,05. Untuk mengubah isi Component, buka Edit isi terlebih dahulu. |
 | Penghapus | Pilih Penghapus (E), lalu klik objek atau Group. Gunakan Ctrl+Z untuk mengurungkan. |
