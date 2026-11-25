@@ -22,6 +22,8 @@ const icons = {
   trash:'<path d="M3 6h18M9 6V3h6v3m3 0-1 15H7L6 6m4 4v7m4-7v7"/>',
   minus:'<path d="M5 12h14"/>', plus:'<path d="M5 12h14M12 5v14"/>',
   close:'<path d="m6 6 12 12M18 6 6 18"/>',
+  moon:'<path d="M20 15.5A8 8 0 0 1 8.5 4 8 8 0 1 0 20 15.5z"/>',
+  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/>',
   select:'<path d="m5 3 14 10-7 1-3 6z"/>',
   line:'<path d="m5 19 14-14"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/>',
   arc:'<path d="M3 19A16 16 0 0 1 21 19"/><circle cx="3" cy="19" r="1.4"/><circle cx="21" cy="19" r="1.4"/>',
@@ -53,7 +55,7 @@ const tools = {
   circle: ['Lingkaran', 'C', 'Tarik dari pusat untuk mengatur radius'],
   pull: ['Push/Pull', 'P', 'Tarik bidang atas ke atas atau ke bawah'],
   move: ['Pindah', 'M', 'Tarik objek sejajar bidang dasar'],
-  rotate: ['Rotate', 'Q', 'Tarik mengelilingi pusat objek untuk memutar pada sumbu Z'],
+  rotate: ['Rotate', 'J', 'Tarik mengelilingi pusat objek untuk memutar pada sumbu Z'],
   scale: ['Skala', 'S', 'Tarik dari objek untuk mengubah ukurannya secara proporsional'],
   erase: ['Penghapus', 'E', 'Klik objek untuk menghapus; Ctrl+Z untuk mengurungkan'],
   measure: ['Ukur', 'T', 'Tarik antara dua titik untuk membaca jarak pada bidang gambar'],
@@ -73,7 +75,7 @@ const identity = () => {
 const state = {
   room: '', client: identity(), name: localStorage.getItem('qreasee-name') || 'Tamu',
   doc: null, meshes: [], plans: [], selected: new Set(), inside: null, tool: 'select', layout: false, busy: false,
-  snapping: localStorage.getItem('qreasee-snap') !== 'off', inference: null,
+  snapping: true, inference: null,
   undo: [], redo: [], drag: null, arcPending:null, hits: [], epoch: 0, polling: false, peers:[], cursor:null
 };
 const canvas = $('#viewport');
@@ -82,6 +84,8 @@ const camera = { yaw: .62, pitch: .48, axes:null, scale: 40, base: 40, baseDista
   x: 0, y: 0, center:[0,0,0], distance:22, perspective:true };
 const perspectiveFov = 35*Math.PI/180;
 const nearPlane = .01;
+const unitFactors = {m:1,cm:100,mm:1000};
+let displayUnit = unitFactors[localStorage.getItem('qreasee-unit')] ? localStorage.getItem('qreasee-unit') : 'm';
 const views = { perspective:[.62,.48], iso:[.62,.54], plan:[0,Math.PI/2], front:[0,0], right:[Math.PI/2,0] };
 const clamp = (value,min,max) => Math.max(min,Math.min(max,value));
 const round = value => Math.round(value * 1000) / 1000;
@@ -121,14 +125,68 @@ function setTool(tool) {
 }
 setTool('select');
 
+function panel(name,open) {
+  const element=$('#'+(name==='objects'?'object-panel':'inspector'));
+  const button=$('#'+(name==='objects'?'browser-toggle':'inspector-toggle'));
+  element.hidden=!open;
+  $('#workspace').classList.toggle(name==='objects'?'objects-open':'inspector-open',open);
+  button.setAttribute('aria-expanded',String(open));
+  redraw();
+}
+$('#browser-toggle').onclick=()=>panel('objects',$('#object-panel').hidden);
+$('#browser-close').onclick=()=>panel('objects',false);
+$('#inspector-toggle').onclick=()=>panel('inspector',$('#inspector').hidden);
+$('#inspector-close').onclick=()=>panel('inspector',false);
+$('#tree-toggle').onclick=()=>{
+  const open=$('#objects').hidden;
+  $('#objects').hidden=!open;
+  $('#tree-toggle').setAttribute('aria-expanded',String(open));
+};
+function theme(value) {
+  document.body.dataset.theme=value;
+  icon($('#theme-toggle'),value==='light'?'moon':'sun');
+  $('#theme-toggle').title=value==='light'?'Gunakan tema gelap':'Gunakan tema terang';
+  localStorage.setItem('qreasee-theme',value);
+}
+theme(localStorage.getItem('qreasee-theme')==='light'?'light':'dark');
+$('#theme-toggle').onclick=()=>theme(document.body.dataset.theme==='light'?'dark':'light');
+
+const lengthFields=['x','y','z','width','depth','height'];
+const displayLength=value=>Number((value*unitFactors[displayUnit]).toFixed(displayUnit==='m'?3:displayUnit==='cm'?2:1));
+const lengthLabel=value=>displayLength(value)+' '+displayUnit;
+function updateCoordinates() {
+  $('#coordinates').textContent=state.cursor
+    ? 'X '+displayLength(state.cursor.x)+'  Y '+displayLength(state.cursor.y) : 'X —  Y —';
+}
+function convertFormUnits(form,fields,before,after) {
+  for (const field of fields) {
+    const input=form.elements.namedItem(field);
+    if (input && input.value!=='') input.value=Number((Number(input.value)*after/before).toFixed(4));
+  }
+}
+$('#unit-select').value=displayUnit;
+$('#unit-select').onchange=event=>{
+  const next=event.target.value;
+  const before=unitFactors[displayUnit],after=unitFactors[next];
+  convertFormUnits($('#object-form'),lengthFields,before,after);
+  convertFormUnits($('#sheet-form'),['cut_height'],before,after);
+  displayUnit=next;
+  document.querySelectorAll('.unit-label').forEach(label=>label.textContent=next);
+  localStorage.setItem('qreasee-unit',next);
+  updateCoordinates();
+  if (state.layout) drawSheet();
+};
+document.querySelectorAll('.unit-label').forEach(label=>label.textContent=displayUnit);
+
 function mode(layout) {
   state.layout = layout;
   state.cursor = null;
   state.arcPending = null;
-  for (const id of ['tools','stage','tree','inspector']) {
+  for (const id of ['stage','tree','inspector']) {
     $('#model-' + id).hidden = layout;
     $('#layout-' + id).hidden = !layout;
   }
+  $('#tool-buttons').hidden=layout;
   $('#model-tab').setAttribute('aria-pressed', String(!layout));
   $('#layout-tab').setAttribute('aria-pressed', String(layout));
   $('#left-title').textContent = layout ? 'Lembar gambar' : 'Struktur model';
@@ -185,7 +243,7 @@ async function openRoom(createBlank) {
   objectBaseline = null;
   sheetBaseline = null;
   connection(false, 'Menghubungkan');
-  $('#project-title').textContent = 'Qreasee Studio';
+  $('#project-title').textContent = 'Qreasee';
   $('#revision').textContent = '';
   $('#avatars').replaceChildren();
   delete $('#avatars').dataset.signature;
@@ -236,7 +294,7 @@ function accept(data) {
   const cursorChanged=JSON.stringify(state.peers)!==JSON.stringify(others);
   state.peers=others;
   connection(true, window.qreaseeCloudPost ? peers.length + ' online' :
-    window.qreaseeDemoPost ? 'Demo lokal' : peers.length + ' online');
+    window.qreaseeDemoPost ? 'Lokal' : peers.length + ' online');
   if (cursorChanged) {
     if (state.layout) drawLayoutCursors();
     else redraw();
@@ -376,9 +434,6 @@ function reverse(redo) {
 function refreshButtons() {
   $('#undo').disabled = state.busy || !state.undo.length;
   $('#redo').disabled = state.busy || !state.redo.length;
-  const loose=state.selected.size>0 && [...state.selected].every(id=>objects().some(object=>object.id===id && !object.container));
-  $('#make-group').disabled = state.busy || !loose;
-  $('#make-component').disabled = state.busy || !loose;
   for (const id of ['copy-container','explode-container','remove-container','duplicate','delete']) {
     $('#'+id).disabled=state.busy;
   }
@@ -410,7 +465,7 @@ function refresh(force = false) {
   form.hidden = !object;
   $('#select-prompt').hidden = Boolean(object) || group.length>0;
   $('#select-prompt').textContent=state.selected.size>1
-    ? state.selected.size+' pilihan. Gunakan Group atau Component untuk menggabungkan objek lepas.'
+    ? state.selected.size+' pilihan. Tekan G untuk Group atau Q untuk Component.'
     : 'Klik untuk memilih objek. Gunakan Shift + klik untuk menambah pilihan.';
   if (object) {
     $('#selection-title').textContent = object.name;
@@ -420,7 +475,7 @@ function refresh(force = false) {
     if (force || objectBaseline?.id !== object.id || form.dataset.dirty !== 'yes') {
       Object.entries(object).forEach(([key,value]) => {
         const input = form.elements.namedItem(key);
-        if (input) input.value = value;
+        if (input) input.value = lengthFields.includes(key) ? displayLength(value) : value;
       });
       form.elements.height.readOnly = object.shape === 'line';
       objectBaseline = object;
@@ -429,7 +484,9 @@ function refresh(force = false) {
   } else objectBaseline = null;
   const sheetForm = $('#sheet-form');
   if (doc && (force || sheetForm.dataset.dirty !== 'yes')) {
-    Object.entries(doc.sheet).forEach(([key,value]) => { sheetForm.elements.namedItem(key).value = value; });
+    Object.entries(doc.sheet).forEach(([key,value]) => {
+      sheetForm.elements.namedItem(key).value = key==='cut_height' ? displayLength(value) : value;
+    });
     sheetBaseline = doc.sheet;
     sheetForm.dataset.dirty = '';
   }
@@ -496,7 +553,13 @@ function removeObject() {
   if (group.length) batch(group,[],[]);
 }
 
-$('#search').oninput = renderTree;
+$('#search').onfocus=()=>panel('objects',true);
+$('#search').oninput=()=>{
+  panel('objects',true);
+  $('#objects').hidden=false;
+  $('#tree-toggle').setAttribute('aria-expanded','true');
+  renderTree();
+};
 $('#undo').onclick = () => reverse(false);
 $('#redo').onclick = () => reverse(true);
 $('#delete').onclick = removeObject;
@@ -567,15 +630,14 @@ function createContainer(component) {
     batch(sources,sources.map(object=>({...object,container:{id,name:label,definition,slot:definition?identity():null}})),[id]);
   };
 }
-$('#make-group').onclick=()=>createContainer(false);
-$('#make-component').onclick=()=>createContainer(true);
 $('#cancel-container').onclick=()=>$('#container-dialog').close();
 $('#object-form').oninput = event => { event.currentTarget.dataset.dirty = 'yes'; };
 $('#object-form').onsubmit = event => {
   event.preventDefault();
   if (!objectBaseline) return;
   const values = Object.fromEntries(new FormData(event.currentTarget));
-  for (const field of ['x','y','z','width','depth','height','rotation']) values[field] = Number(values[field]);
+  for (const field of lengthFields) values[field] = Number(values[field])/unitFactors[displayUnit];
+  values.rotation=Number(values.rotation);
   edit(objectBaseline, {...objectBaseline,...values});
 };
 $('#sheet-form').oninput = event => { event.currentTarget.dataset.dirty = 'yes'; };
@@ -584,7 +646,7 @@ $('#sheet-form').onsubmit = event => {
   if (!sheetBaseline) return;
   const values = Object.fromEntries(new FormData(event.currentTarget));
   values.scale = Number(values.scale);
-  values.cut_height = Number(values.cut_height);
+  values.cut_height = Number(values.cut_height)/unitFactors[displayUnit];
   edit(sheetBaseline, values, 'sheet');
 };
 
@@ -629,7 +691,7 @@ $('#export-json').onclick = () => {
 $('#export-obj').onclick = () => {
   if (!state.doc) return;
   let offset = 1;
-  const output = ['# Qreasee Studio · meters · Z up'];
+  const output = ['# Qreasee · meters · Z up'];
   state.meshes.forEach((mesh,index) => {
     const object = state.doc.objects[index];
     output.push('o ' + object.name.replace(/[^\p{L}\p{N}_-]+/gu,'_'));
@@ -1030,7 +1092,7 @@ function draw() {
     if (Number.isFinite(a[0]) && Number.isFinite(b[0])) {
       strokeLine(a,b,'#bf671c',2);
       for (const [x,y] of [a,b]) { ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#bf671c';ctx.stroke(); }
-      const label=drag.distance.toFixed(3)+' m';
+      const label=lengthLabel(drag.distance);
       ctx.font='bold 12px Segoe UI, sans-serif';
       ctx.fillStyle='#fff';ctx.fillRect((a[0]+b[0])/2-5,(a[1]+b[1])/2-18,ctx.measureText(label).width+10,19);
       ctx.fillStyle='#703b11';ctx.fillText(label,(a[0]+b[0])/2,(a[1]+b[1])/2-4);
@@ -1224,7 +1286,7 @@ function drawingPoint(point,elevation) {
   const xy=ground(point,z);
   if (!xy) return null;
   return {world:[...(state.snapping?xy.map(value=>snap(value)):xy.map(round)),z],
-    label:state.snapping?'Grid 0,25 m':''};
+    label:state.snapping?'Grid '+lengthLabel(.25):''};
 }
 
 function arcPoints(a,b,bulge) {
@@ -1279,16 +1341,6 @@ function offsetOutline(outline,distance) {
     return [a[0]+shift*previous.direction[0],a[1]+shift*previous.direction[1],vertex[2]];
   });
 }
-
-function setSnapping(enabled) {
-  state.snapping=enabled;
-  state.inference=null;
-  $('#snap-toggle').setAttribute('aria-pressed',String(enabled));
-  localStorage.setItem('qreasee-snap',enabled?'on':'off');
-  redraw();
-}
-setSnapping(state.snapping);
-$('#snap-toggle').onclick=()=>setSnapping(!state.snapping);
 
 canvas.addEventListener('contextmenu',event=>event.preventDefault());
 canvas.addEventListener('wheel',event=>{
@@ -1411,7 +1463,7 @@ canvas.addEventListener('pointermove',event=>{
   const point=pointer(event);
   const onGround=ground(point);
   state.cursor=onGround?{mode:'model',x:round(onGround[0]),y:round(onGround[1])}:null;
-  $('#coordinates').textContent=onGround ? 'X '+onGround[0].toFixed(2)+'  Y '+onGround[1].toFixed(2) : 'X —  Y —';
+  updateCoordinates();
   const drag=state.drag;
   if (!drag) {
     if (state.tool==='arc' && state.arcPending) {
@@ -1452,7 +1504,7 @@ canvas.addEventListener('pointermove',event=>{
     const limit=Math.min(drag.object.width,drag.object.depth)/2-.01;
     drag.distance=clamp(state.snapping?snap(raw,.05):round(raw),-limit,100);
     drag.contour=Math.abs(drag.distance)>.001?offsetOutline(drag.outline,drag.distance):null;
-    status('Offset '+drag.distance.toFixed(3)+' m');
+    status('Offset '+lengthLabel(drag.distance));
   } else if (drag.tool==='arc') {
     const candidate=drawingPoint(point,drag.initial[2]);
     drag.end=candidate?.world||null;
@@ -1464,7 +1516,7 @@ canvas.addEventListener('pointermove',event=>{
     drag.end=candidate.world;
     drag.distance=Math.hypot(drag.end[0]-drag.initial[0],drag.end[1]-drag.initial[1]);
     state.inference=candidate.label?candidate:null;
-    status('Jarak '+drag.distance.toFixed(3)+' m');
+    status('Jarak '+lengthLabel(drag.distance));
   } else if (drag.tool==='scale') {
     const end=ground(point,drag.elevation);
     if (!end) { drag.updates=null;redraw();return; }
@@ -1498,7 +1550,7 @@ canvas.addEventListener('pointermove',event=>{
     if (!Number.isFinite(slope) || Math.abs(slope)<.01) return;
     const value=height+dy/slope;
     drag.updates=[{...drag.object,height:Math.max(0,state.snapping?snap(value,.05):round(value))}];
-    status('Tinggi '+drag.updates[0].height.toFixed(2)+' m');
+    status('Tinggi '+lengthLabel(drag.updates[0].height));
   } else if (drag.tool==='move') {
     const end=ground(point,drag.elevation);
     if (!end) { drag.updates=null;redraw();return; }
@@ -1572,6 +1624,7 @@ window.addEventListener('keydown',event=>{
   if (state.layout || event.ctrlKey || event.metaKey || event.altKey) return;
   if (key==='DELETE' || key==='BACKSPACE') { event.preventDefault();removeObject();return; }
   if (key==='F') { fit();return; }
+  if (key==='G' || key==='Q') { event.preventDefault();createContainer(key==='Q');return; }
   const tool=Object.entries(tools).find(([,value])=>value[1]===key);
   if (tool) setTool(tool[0]);
 });
@@ -1638,10 +1691,10 @@ function drawSheet() {
         line(start[0],dy,end[0],dy);
         line(start[0]-1,dy+1,start[0]+1,dy-1);
         line(end[0]-1,dy+1,end[0]+1,dy-1);
-        text(center[0],dy-1.5,(max[0]-min[0]).toFixed(2)+' m',{'text-anchor':'middle','font-size':2.9});
+        text(center[0],dy-1.5,lengthLabel(max[0]-min[0]),{'text-anchor':'middle','font-size':2.9});
       }
     }
-    const caption=mode==='plan'?label+'  /  POTONG '+settings.cut_height.toFixed(2)+' m':label;
+    const caption=mode==='plan'?label+'  /  POTONG '+lengthLabel(settings.cut_height):label;
     text(x+3,y+h-5,caption,{'font-weight':700});
     text(x+w-3,y+h-5,mode==='iso'?'TANPA SKALA':'1:'+settings.scale,{'text-anchor':'end',fill:'#52616d','font-size':2.9});
   }

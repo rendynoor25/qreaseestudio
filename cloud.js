@@ -2,8 +2,6 @@
 
 // Supabase-backed preview. A room UUID in the link grants edit access.
 const cloudConfig = window.qreaseeCloudConfig;
-document.querySelector('#demo-badge').textContent = 'DEMO BERSAMA';
-document.querySelector('#demo-badge').title = 'Ruang tersimpan di Supabase; siapa pun dengan tautan dapat mengedit';
 document.querySelector('#share').hidden = false;
 document.querySelector('#copy-link').disabled = false;
 window.qreaseeCloudPost = true;
