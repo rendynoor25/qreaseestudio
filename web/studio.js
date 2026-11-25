@@ -81,6 +81,7 @@ const ctx = canvas.getContext('2d');
 const camera = { yaw: .62, pitch: .48, axes:null, scale: 40, base: 40, baseDistance:22,
   x: 0, y: 0, center:[0,0,0], distance:22, perspective:true };
 const perspectiveFov = 35*Math.PI/180;
+const nearPlane = .01;
 const views = { perspective:[.62,.48], iso:[.62,.54], plan:[0,Math.PI/2], front:[0,0], right:[Math.PI/2,0] };
 const clamp = (value,min,max) => Math.max(min,Math.min(max,value));
 const round = value => Math.round(value * 1000) / 1000;
@@ -718,10 +719,13 @@ function zoom(factor,x=canvas.clientWidth/2,y=canvas.clientHeight/2) {
     const [,,depth]=cameraAxes();
     const eye=camera.center.map((value,i)=>value+camera.distance*depth[i]);
     const fromEye=Math.hypot(...eye.map((value,i)=>value-pivot[i]));
-    let ratio=clamp(1/factor,.1/camera.distance,100000/camera.distance);
-    if (ratio<1 && fromEye*ratio<.2) ratio=Math.min(1,.2/Math.max(fromEye,1e-9));
-    camera.center=pivot.map((value,i)=>value+ratio*(camera.center[i]-value));
-    camera.distance*=ratio;
+    const ratio=1/factor;
+    const direction=fromEye>1e-9
+      ? pivot.map((value,i)=>(value-eye[i])/fromEye) : depth.map(value=>-value);
+    const step=(1-ratio)*Math.max(fromEye,1.2);
+    const nextEye=eye.map((value,i)=>value+step*direction[i]);
+    camera.distance=clamp(camera.distance*ratio,.1,100000);
+    camera.center=nextEye.map((value,i)=>value-camera.distance*depth[i]);
     camera.scale=focalPixels()/camera.distance;
     redraw();
     return;
@@ -743,7 +747,7 @@ function projectPoint(point) {
   const relative=point.map((value,i)=>value-camera.center[i]);
   const [u,v,d]=cameraAxes().map(axis=>axis.reduce((sum,value,i)=>sum+value*relative[i],0));
   const w=camera.perspective ? 1-d/camera.distance : 1;
-  return w>(camera.perspective ? .05/camera.distance : 0) ? [u/w,v/w,d/w,w] : [NaN,NaN,d,w];
+  return w>(camera.perspective ? nearPlane/camera.distance-1e-9 : 0) ? [u/w,v/w,d/w,w] : [NaN,NaN,d,w];
 }
 
 function stagePoint(point) {
@@ -761,7 +765,7 @@ function ground([x,y], z=0) {
   if (camera.perspective) {
     depth=(z-camera.center[2]-vertical)/(depthAxis[2]-vertical/camera.distance);
     factor=1-depth/camera.distance;
-    if (!Number.isFinite(factor) || factor<=.05/camera.distance) return null;
+    if (!Number.isFinite(factor) || factor<=nearPlane/camera.distance) return null;
   } else {
     if (Math.abs(depthAxis[2])<.03) return null;
     depth=(z-camera.center[2]-vertical)/depthAxis[2];
@@ -789,7 +793,7 @@ function strokeLine(a,b,color,width=1) {
 
 function clipNear(world) {
   const [,,depth]=cameraAxes();
-  const near=.051;
+  const near=nearPlane;
   const distance=point=>camera.distance-depth.reduce((sum,value,i)=>
     sum+value*(point[i]-camera.center[i]),0);
   const values=world.map(distance);
