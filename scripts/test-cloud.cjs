@@ -14,11 +14,13 @@ const local = Object.fromEntries((fs.existsSync(envFile) ? fs.readFileSync(envFi
   }));
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL || local.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || local.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+const accessToken = process.env.QREASEE_TEST_ACCESS_TOKEN;
 if (!url || !key) throw new Error('Supabase configuration is missing.');
 
 async function rpc(name, parameters, expected = 200) {
   const response = await fetch(url + '/rest/v1/rpc/' + name, {
-    method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' },
+    method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json',
+      ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}) },
     body: JSON.stringify(parameters), signal: AbortSignal.timeout(10000)
   });
   const body = await response.json();

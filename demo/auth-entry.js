@@ -1,0 +1,78 @@
+import { createClient } from '@supabase/supabase-js';
+
+const config = window.qreaseeCloudConfig;
+const supabase = createClient(config.url, config.key, {
+  auth: { flowType: 'pkce', detectSessionInUrl: true,
+    persistSession: true, autoRefreshToken: true }
+});
+const gate = document.querySelector('#auth-gate');
+const message = document.querySelector('#auth-message');
+const login = document.querySelector('#google-login');
+const pendingRoomKey = 'qreasee-auth-pending-room';
+let currentUser = null;
+
+function showAccount(user) {
+  currentUser = user;
+  gate.hidden = true;
+  const account = document.createElement('div');
+  account.className = 'auth-account';
+  const label = document.createElement('span');
+  label.textContent = user.user_metadata?.full_name || user.email || 'Akun Google';
+  label.title = user.email || label.textContent;
+  const signOut = document.createElement('button');
+  signOut.type = 'button';
+  signOut.textContent = 'Keluar';
+  signOut.onclick = async () => {
+    signOut.disabled = true;
+    const { error } = await supabase.auth.signOut();
+    if (error) { message.textContent = error.message; signOut.disabled = false; return; }
+    location.reload();
+  };
+  account.append(label, signOut);
+  document.querySelector('.collaboration').prepend(account);
+}
+
+login.onclick = async () => {
+  login.disabled = true;
+  message.textContent = 'Membuka Google…';
+  if (location.hash) sessionStorage.setItem(pendingRoomKey, location.hash);
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google', options: { redirectTo: location.origin + location.pathname }
+  });
+  if (error) { message.textContent = error.message; login.disabled = false; }
+};
+
+const ready = (async () => {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) message.textContent = error.message;
+  if (!data.session?.user) {
+    login.disabled = false;
+    if (!error) message.textContent = new URLSearchParams(location.search).get('error_description') ||
+      'Gunakan akun Google untuk membuka proyek.';
+    return null;
+  }
+  const pending = sessionStorage.getItem(pendingRoomKey);
+  const roomHash = /^#[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(location.hash)
+    ? location.hash : pending || '';
+  if (pending || location.search) {
+    history.replaceState(null, '', location.pathname + roomHash);
+  }
+  sessionStorage.removeItem(pendingRoomKey);
+  showAccount(data.session.user);
+  document.querySelector('#share-dialog > p').textContent =
+    'Akun Google yang memiliki tautan ini dapat mengedit proyek.';
+  return data.session;
+})();
+
+window.qreaseeAuth = {
+  ready,
+  async session() {
+    await ready;
+    const { data, error } = await supabase.auth.getSession();
+    if (error || !data.session) throw new Error('login_required');
+    return data.session;
+  },
+  get displayName() {
+    return currentUser?.user_metadata?.full_name || currentUser?.email || 'Akun Google';
+  }
+};

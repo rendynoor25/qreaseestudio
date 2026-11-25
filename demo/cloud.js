@@ -9,14 +9,20 @@ document.querySelector('#copy-link').disabled = false;
 window.qreaseeCloudPost = true;
 
 async function cloudRpc(name, parameters) {
+  const session = window.qreaseeAuth ? await window.qreaseeAuth.session() : null;
   const response = await fetch(cloudConfig.url + '/rest/v1/rpc/' + name, {
     method: 'POST',
-    headers: { apikey: cloudConfig.key, 'Content-Type': 'application/json' },
+    headers: { apikey: cloudConfig.key, 'Content-Type': 'application/json',
+      ...(session ? { Authorization: 'Bearer ' + session.access_token } : {}) },
     body: JSON.stringify(parameters),
     signal: AbortSignal.timeout(10000)
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.message || 'Supabase tidak tersedia.');
+  if (!response.ok) {
+    const error = new Error(payload.message || 'Supabase tidak tersedia.');
+    error.status = response.status;
+    throw error;
+  }
   return payload;
 }
 
@@ -43,7 +49,8 @@ window.qreaseeDemoPost = async (url, request) => {
       peers: payload.peers || [], topology: { added: [], removed: [] }
     } };
   } catch (error) {
-    const code = error.message === 'room_missing' ? 404 : error.message === 'conflict' ? 409 : 503;
+    const code = error.message === 'room_missing' ? 404 : error.message === 'conflict' ? 409 :
+      error.message === 'login_required' || error.status === 401 || error.status === 403 ? 401 : 503;
     let changes;
     if (code === 409) {
       try {
@@ -56,6 +63,7 @@ window.qreaseeDemoPost = async (url, request) => {
       } catch { /* The next poll will retry. */ }
     }
     return { code, data: { error: code === 503 ? 'Ruang bersama belum siap: ' + error.message :
+      code === 401 ? 'Sesi berakhir. Masuk kembali dengan Google.' :
       code === 409 ? 'Objek atau lembar sudah diubah di sesi lain.' : 'Ruang tidak ditemukan.',
       changes, peers: [] } };
   }

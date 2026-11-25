@@ -2,5 +2,6 @@
 target
 data
 dist
+node_modules
 _chrome_video_*
 _video_*

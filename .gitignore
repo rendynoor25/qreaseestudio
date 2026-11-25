@@ -5,6 +5,7 @@
 /data/
 /data-lan-demo/
 /dist/
+/node_modules/
 /.vercel/
 /.env.local
 /qreasee-studio.exe

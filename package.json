@@ -1,0 +1,12 @@
+{
+  "private": true,
+  "scripts": {
+    "build:demo": "node scripts/build-demo.cjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.119.2"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}
