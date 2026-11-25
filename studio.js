@@ -653,15 +653,6 @@ function cameraAxes() {
   return camera.axes;
 }
 
-function orbitAxes(source, horizontal, vertical) {
-  const [right,down,depth]=source;
-  const ch=Math.cos(horizontal),sh=Math.sin(horizontal);
-  const turn=([x,y,z])=>[ch*x-sh*y,sh*x+ch*y,z];
-  const cv=Math.cos(vertical),sv=Math.sin(vertical);
-  return [turn(right),turn(down.map((value,i)=>value*cv+depth[i]*sv)),
-    turn(depth.map((value,i)=>value*cv-down[i]*sv))];
-}
-
 function bounds(points) {
   const min = [Infinity,Infinity,Infinity], max = [-Infinity,-Infinity,-Infinity];
   for (const point of points) {
@@ -1375,9 +1366,13 @@ canvas.addEventListener('pointermove',event=>{
   state.inference=null;
   const dx=point[0]-drag.start[0], dy=point[1]-drag.start[1];
   if (drag.tool==='orbit') {
-    camera.axes=orbitAxes(drag.axes,-dx*.009,-dy*.008);
+    const speed=2*Math.PI/Math.max(480,canvas.clientHeight);
+    camera.yaw=drag.camera.yaw-dx*speed;
+    camera.pitch=clamp(drag.camera.pitch+dy*speed,-Math.PI/2+.01,Math.PI/2-.01);
+    camera.axes=null;
+    const axes=cameraAxes();
     camera.center=drag.pivot.map((value,i)=>value-
-      drag.coordinates.reduce((sum,coordinate,j)=>sum+coordinate*camera.axes[j][i],0));
+      drag.coordinates.reduce((sum,coordinate,j)=>sum+coordinate*axes[j][i],0));
     if (!camera.perspective) $('#camera').value='iso';
   } else if (drag.tool==='pan') {
     camera.x=drag.camera.x+dx;
