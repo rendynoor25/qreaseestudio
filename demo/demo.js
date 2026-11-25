@@ -1,7 +1,6 @@
 'use strict';
 
 // Static Vercel preview: each browser stores its own editable copy of a room.
-document.querySelector('#demo-badge').hidden = false;
 document.querySelector('#share').addEventListener('click', () => {
   if (window.qreaseeCloudPost) return;
   queueMicrotask(() => {

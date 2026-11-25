@@ -9,3 +9,8 @@
 .auth-account span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .auth-account button{background:transparent;border:1px solid #454d58;border-radius:5px;color:#c9d1db;cursor:pointer;padding:4px 6px}
 @media(max-width:900px){.auth-account span{display:none}}
+body[data-theme=light] #auth-gate{background:#e7e9ec}
+body[data-theme=light] .auth-card{background:#fff;border-color:#d3d9e1;box-shadow:0 20px 70px #26313d25}
+body[data-theme=light] .auth-card p{color:#5e6978}
+body[data-theme=light] .auth-account{color:#344253}
+body[data-theme=light] .auth-account button{color:#344253;border-color:#cbd2db}

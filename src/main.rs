@@ -21,6 +21,7 @@ const CONNECTION_LIMIT: usize = 64;
 const HTML: &str = include_str!("../web/index.html");
 const CSS: &str = include_str!("../web/studio.css");
 const JS: &str = include_str!("../web/studio.js");
+const LOGO: &[u8] = include_bytes!("../web/qreasee-logo.png");
 
 struct Room {
     document: Document,
@@ -65,7 +66,7 @@ fn main() -> io::Result<()> {
         rooms: Mutex::new(HashMap::new()),
     });
     let listener = TcpListener::bind(&address)?;
-    println!("Qreasee Studio · http://{}", listener.local_addr()?);
+    println!("Qreasee · http://{}", listener.local_addr()?);
     let connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     use std::sync::atomic::Ordering::Relaxed;
     for mut stream in listener.incoming().flatten() {
@@ -191,6 +192,12 @@ fn serve(mut stream: TcpStream, studio: &Studio) -> io::Result<()> {
             "200 OK",
             "text/javascript; charset=utf-8",
             JS.as_bytes(),
+        ),
+        ("GET", "/qreasee-logo.png") => respond(
+            &mut stream,
+            "200 OK",
+            "image/png",
+            LOGO,
         ),
         ("POST", _) if !json_input => reject(
             &mut stream,
