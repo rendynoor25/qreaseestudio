@@ -1066,6 +1066,36 @@ function pickFace(point, preferLine) {
   return face;
 }
 
+function orbitPivot(point) {
+  const face=pickFace(point,false);
+  if (!face) {
+    const xy=ground(point,camera.center[2]);
+    return xy ? [...xy,camera.center[2]] : [...camera.center];
+  }
+  if (face.world.length<3) {
+    const xy=ground(point,face.object.z);
+    return xy ? [...xy,face.object.z] : [...face.world[0]];
+  }
+  const [right,down,depth]=cameraAxes();
+  const u=(point[0]-canvas.clientWidth/2-camera.x)/camera.scale;
+  const v=(point[1]-canvas.clientHeight/2-camera.y)/camera.scale;
+  const origin=camera.perspective
+    ? camera.center.map((value,i)=>value+camera.distance*depth[i])
+    : camera.center.map((value,i)=>value+u*right[i]+v*down[i]);
+  const ray=camera.perspective
+    ? depth.map((value,i)=>u*right[i]+v*down[i]-camera.distance*value)
+    : depth;
+  const [a,b,c]=face.world;
+  const ab=b.map((value,i)=>value-a[i]), ac=c.map((value,i)=>value-a[i]);
+  const normal=[ab[1]*ac[2]-ab[2]*ac[1],ab[2]*ac[0]-ab[0]*ac[2],ab[0]*ac[1]-ab[1]*ac[0]];
+  const dot=(left,right)=>left.reduce((sum,value,i)=>sum+value*right[i],0);
+  const divisor=dot(normal,ray);
+  if (Math.abs(divisor)<1e-9) return [...a];
+  const t=dot(normal,a.map((value,i)=>value-origin[i]))/divisor;
+  if (!Number.isFinite(t) || (camera.perspective && t<0)) return [...a];
+  return origin.map((value,i)=>value+t*ray[i]);
+}
+
 function infer(point, elevation, excluded = new Set()) {
   if (!state.snapping) return null;
   let best=null;
@@ -1131,7 +1161,11 @@ canvas.addEventListener('pointerdown',event=>{
   const start=pointer(event);
   const tool=event.button === 1 ? (event.shiftKey?'pan':'orbit') : event.button === 2 ? 'pan' : state.tool;
   if (tool === 'orbit' || tool === 'pan') {
-    state.drag={tool,start,camera:{...camera},axes:cameraAxes().map(axis=>[...axis])};
+    const axes=cameraAxes().map(axis=>[...axis]);
+    const pivot=tool==='orbit'?orbitPivot(start):null;
+    const relative=pivot?.map((value,i)=>value-camera.center[i]);
+    const coordinates=relative?.length?axes.map(axis=>axis.reduce((sum,value,i)=>sum+value*relative[i],0)):null;
+    state.drag={tool,start,camera:{...camera},axes,pivot,coordinates};
   } else {
     if (!state.doc || state.busy) return;
     const face=pickFace(start,tool!=='pull');
@@ -1228,6 +1262,8 @@ canvas.addEventListener('pointermove',event=>{
   const dx=point[0]-drag.start[0], dy=point[1]-drag.start[1];
   if (drag.tool==='orbit') {
     camera.axes=orbitAxes(drag.axes,-dx*.009,-dy*.008);
+    camera.center=drag.pivot.map((value,i)=>value-
+      drag.coordinates.reduce((sum,coordinate,j)=>sum+coordinate*camera.axes[j][i],0));
     if (!camera.perspective) $('#camera').value='iso';
   } else if (drag.tool==='pan') {
     camera.x=drag.camera.x+dx;
