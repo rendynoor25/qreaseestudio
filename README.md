@@ -60,6 +60,10 @@ Jalankan `node scripts/build-demo.cjs` untuk menghasilkan folder `dist` berisi l
 
 Untuk menguji kolaborasi antara dua PC pada Wi-Fi yang sama, jalankan server Rust dengan `QREASEE_ADDR=0.0.0.0:8944` dan direktori `QREASEE_DATA` khusus demo. Buka `http://<IP-PC-SERVER>:8944/` pada kedua PC, buat ruang dari PC pertama, dan gunakan Bagikan untuk menyalin URL ruang yang sama. PC server harus tetap menyala; firewall Windows mungkin perlu mengizinkan koneksi masuk pada port 8944. Jangan memakai URL `127.0.0.1` di PC kedua karena alamat itu selalu menunjuk ke PC yang sedang digunakan.
 
+## Konfigurasi Supabase
+
+Salin `.env.example` ke `.env.local`, lalu isi URL proyek dan publishable key dari Supabase. `.env.local` diabaikan Git. Jalankan `node scripts/check-supabase.cjs` untuk memeriksa koneksi tanpa mencetak key. Konfigurasi ini belum dipakai untuk menyimpan ruang atau autentikasi; editor tetap memakai server Rust, sedangkan demo Vercel memakai penyimpanan browser. Contoh Next.js `page.tsx`, helper SSR, dan middleware tidak digunakan karena Qreasee saat ini bukan aplikasi Next.js.
+
 Tautan ruang memberikan izin edit kepada siapa pun yang memegangnya. Versi ini belum memiliki akun, peran pengguna, riwayat revisi yang bisa dipulihkan, atau pengujian beban produksi. Untuk ruang privat, batasi akses di depan server dan gunakan tautan langsung hanya untuk peserta yang dipercaya. Simpan cadangan direktori data jika model diperlukan di kemudian hari.
 
 Revisi dan posisi kursor diperiksa setiap 350 ms selama tab aktif. Perubahan geometri dibagikan setelah drag dilepas atau setelah nilai diterapkan. Edit pada objek yang berbeda bisa digabung, sedangkan edit dari versi lama pada objek atau lembar yang sama ditolak dan memuat keadaan terbaru. Undo/redo berlaku pada operasi sesi sendiri dan tunduk pada pemeriksaan konflik yang sama.
