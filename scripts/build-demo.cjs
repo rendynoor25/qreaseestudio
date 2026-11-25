@@ -26,7 +26,7 @@ const html = fs.readFileSync(path.join(root, 'web', 'index.html'), 'utf8')
       '<script src="./cloud.js" defer></script>\n  ' : '') +
     '<script src="./studio.js" defer></script>');
 fs.writeFileSync(path.join(output, 'index.html'), html);
-for (const name of ['studio.css', 'studio.js', 'qreasee-logo.png']) {
+for (const name of ['studio.css', 'studio.js', 'qreasee-logo.png', 'qreasee-logo-black.png']) {
   fs.copyFileSync(path.join(root, 'web', name), path.join(output, name));
 }
 fs.copyFileSync(path.join(root, 'demo', 'demo.js'), path.join(output, 'demo.js'));
