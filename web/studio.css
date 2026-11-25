@@ -120,12 +120,13 @@ dialog label{margin:12px 0}
 @page{size:A3 landscape;margin:0}
 @media print{html,body{background:white!important;color:black!important;height:auto;min-height:0;overflow:visible;display:block}.app-header,.actionbar,.sidebar,#model-stage,footer,dialog{display:none!important}.workspace{display:block}.layout-stage{display:block;padding:0;overflow:visible;background:white}#sheet{width:420mm!important;height:297mm!important;max-width:none;box-shadow:none;print-color-adjust:exact;-webkit-print-color-adjust:exact}}
 
-#viewport[data-tool=line],#viewport[data-tool=rectangle],#viewport[data-tool=circle]{cursor:crosshair}
+#viewport[data-tool=line],#viewport[data-tool=arc],#viewport[data-tool=rectangle],#viewport[data-tool=circle]{cursor:crosshair}
 #viewport[data-tool=move],#viewport[data-tool=pan],#viewport[data-tool=orbit]{cursor:grab}
 #viewport[data-tool=pull]{cursor:ns-resize}
 #viewport[data-tool=scale]{cursor:nwse-resize}
 #viewport[data-tool=erase]{cursor:cell}
 #viewport[data-tool=measure]{cursor:crosshair}
+#viewport[data-tool=offset]{cursor:crosshair}
 .hint-stack{display:flex;align-items:center;gap:6px;min-width:0}
 #snap-feedback{padding:5px 8px;background:#e4f6ef;border:1px solid #87b6a6;color:#185847;border-radius:6px;font-size:11px;white-space:nowrap}
 #snap-feedback:empty{display:none}

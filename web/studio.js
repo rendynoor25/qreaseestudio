@@ -24,6 +24,8 @@ const icons = {
   close:'<path d="m6 6 12 12M18 6 6 18"/>',
   select:'<path d="m5 3 14 10-7 1-3 6z"/>',
   line:'<path d="m5 19 14-14"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/>',
+  arc:'<path d="M3 19A16 16 0 0 1 21 19"/><circle cx="3" cy="19" r="1.4"/><circle cx="21" cy="19" r="1.4"/>',
+  offset:'<rect x="3" y="3" width="18" height="18"/><rect x="8" y="8" width="8" height="8"/>',
   rectangle:'<rect x="4" y="6" width="16" height="12" rx="1"/>',
   polygon:'<path d="M3 19 5 6l10-3 6 7-5 10z"/>',
   circle:'<circle cx="12" cy="12" r="8"/>',
@@ -45,6 +47,8 @@ document.querySelectorAll('[data-icon]').forEach(element => icon(element, elemen
 const tools = {
   select: ['Pilih', 'V', 'Klik objek untuk memilih'],
   line: ['Garis', 'L', 'Tarik garis pada bidang dasar'],
+  arc: ['Busur', 'A', 'Tarik titik awal ke titik akhir, lalu klik untuk menentukan lengkung busur'],
+  offset: ['Offset', 'I', 'Tarik dari bidang persegi atau lingkaran untuk membuat kontur sejajar'],
   rectangle: ['Persegi panjang', 'R', 'Tarik persegi panjang pada bidang dasar'],
   circle: ['Lingkaran', 'C', 'Tarik dari pusat untuk mengatur radius'],
   pull: ['Push/Pull', 'P', 'Tarik bidang atas ke atas atau ke bawah'],
@@ -70,7 +74,7 @@ const state = {
   room: '', client: identity(), name: localStorage.getItem('qreasee-name') || 'Tamu',
   doc: null, meshes: [], plans: [], selected: new Set(), inside: null, tool: 'select', layout: false, busy: false,
   snapping: localStorage.getItem('qreasee-snap') !== 'off', inference: null,
-  undo: [], redo: [], drag: null, hits: [], epoch: 0, polling: false, peers:[], cursor:null
+  undo: [], redo: [], drag: null, arcPending:null, hits: [], epoch: 0, polling: false, peers:[], cursor:null
 };
 const canvas = $('#viewport');
 const ctx = canvas.getContext('2d');
@@ -102,6 +106,7 @@ for (const [id, [label, key]] of Object.entries(tools)) {
 }
 
 function setTool(tool) {
+  if (state.tool!==tool) state.arcPending=null;
   state.tool = tool;
   $('#tool-hint').textContent = tools[tool][2];
   canvas.dataset.tool = tool;
@@ -116,6 +121,7 @@ setTool('select');
 function mode(layout) {
   state.layout = layout;
   state.cursor = null;
+  state.arcPending = null;
   for (const id of ['tools','stage','tree','inspector']) {
     $('#model-' + id).hidden = layout;
     $('#layout-' + id).hidden = !layout;
@@ -161,6 +167,7 @@ async function openRoom(createBlank) {
   state.selected.clear();
   state.inside = null;
   state.inference = null;
+  state.arcPending = null;
   state.undo = [];
   state.redo = [];
   state.polling = false;
@@ -964,6 +971,16 @@ function draw() {
       ctx.fillStyle='#703b11';ctx.fillText(label,(a[0]+b[0])/2,(a[1]+b[1])/2-4);
     }
   }
+  const arcPreview=drag?.tool==='arc' && drag.end ? [drag.initial,drag.end] : state.arcPending?.preview;
+  if (arcPreview?.length>1) {
+    ctx.beginPath();
+    arcPreview.forEach((world,i)=>{const [x,y]=stagePoint(world);if(i)ctx.lineTo(x,y);else ctx.moveTo(x,y);});
+    ctx.strokeStyle='#bf671c';ctx.lineWidth=2;ctx.stroke();
+  }
+  if (drag?.tool==='offset' && drag.contour?.length) {
+    polygon(drag.contour.map(stagePoint));
+    ctx.strokeStyle='#bf671c';ctx.lineWidth=2;ctx.stroke();
+  }
   if (drag?.tool==='move' && drag.updates) {
     const anchor=stagePoint([drag.anchor[0]+drag.delta[0],drag.anchor[1]+drag.delta[1],drag.elevation]);
     if (Number.isFinite(anchor[0])) {
@@ -1132,13 +1149,69 @@ function infer(point, elevation, excluded = new Set()) {
 }
 
 function drawingPoint(point,elevation) {
-  const hit=infer(point,elevation);
+  const face=elevation===undefined?pickFace(point,false):null;
+  const surface=face?.world?.length && face.world.every(vertex=>Math.abs(vertex[2]-face.world[0][2])<.00001)
+    ? face.world[0][2] : 0;
+  const z=elevation??surface;
+  const hit=infer(point,z);
   if(hit) return hit;
-  const z=elevation??0;
   const xy=ground(point,z);
   if (!xy) return null;
   return {world:[...(state.snapping?xy.map(value=>snap(value)):xy.map(round)),z],
     label:state.snapping?'Grid 0,25 m':''};
+}
+
+function arcPoints(a,b,bulge) {
+  const dx=b[0]-a[0],dy=b[1]-a[1],chord=Math.hypot(dx,dy);
+  if (chord<.001) return [];
+  const normal=[-dy/chord,dx/chord];
+  const midpoint=[(a[0]+b[0])/2,(a[1]+b[1])/2];
+  const height=(bulge[0]-midpoint[0])*normal[0]+(bulge[1]-midpoint[1])*normal[1];
+  if (Math.abs(height)<.001) return [];
+  const radius=chord*chord/(8*height)+height/2;
+  const center=[midpoint[0]+(height-radius)*normal[0],midpoint[1]+(height-radius)*normal[1]];
+  const start=Math.atan2(a[1]-center[1],a[0]-center[0]);
+  const finish=Math.atan2(b[1]-center[1],b[0]-center[0]);
+  const tau=Math.PI*2;
+  const sweep=height>0 ? -((start-finish+tau)%tau) : (finish-start+tau)%tau;
+  const count=clamp(Math.ceil(Math.abs(sweep)*16),8,64);
+  return Array.from({length:count+1},(_,i)=>{
+    const angle=start+sweep*i/count;
+    return [center[0]+Math.abs(radius)*Math.cos(angle),center[1]+Math.abs(radius)*Math.sin(angle),a[2]];
+  });
+}
+
+function addArc(points) {
+  addLineChain(points,false,'Busur');
+}
+
+function addLineChain(points,closed,name) {
+  const segments=Array.from({length:closed?points.length:points.length-1},(_,i)=>{
+    const a=points[i],b=points[(i+1)%points.length];
+    return {id:identity(),name,shape:'line',x:(a[0]+b[0])/2,y:(a[1]+b[1])/2,z:a[2],
+      width:b[0]-a[0],depth:b[1]-a[1],height:0,rotation:0,color:'#dfcbb8'};
+  }).filter(item=>Math.hypot(item.width,item.depth)>.001);
+  if (segments.length) batch([],segments,[]);
+}
+
+function offsetOutline(outline,distance) {
+  const count=outline.length;
+  const area=outline.reduce((sum,p,i)=>{const q=outline[(i+1)%count];return sum+p[0]*q[1]-q[0]*p[1]},0);
+  const side=area>=0?1:-1;
+  const edges=outline.map((a,i)=>{
+    const b=outline[(i+1)%count],dx=b[0]-a[0],dy=b[1]-a[1],length=Math.hypot(dx,dy);
+    return {direction:[dx,dy],normal:[side*dy/length,-side*dx/length]};
+  });
+  return outline.map((vertex,i)=>{
+    const previous=edges[(i+count-1)%count],next=edges[i];
+    const a=[vertex[0]+previous.normal[0]*distance,vertex[1]+previous.normal[1]*distance];
+    const b=[vertex[0]+next.normal[0]*distance,vertex[1]+next.normal[1]*distance];
+    const cross=(p,q)=>p[0]*q[1]-p[1]*q[0];
+    const divisor=cross(previous.direction,next.direction);
+    if (Math.abs(divisor)<1e-9) return [(a[0]+b[0])/2,(a[1]+b[1])/2,vertex[2]];
+    const shift=cross([b[0]-a[0],b[1]-a[1]],next.direction)/divisor;
+    return [a[0]+shift*previous.direction[0],a[1]+shift*previous.direction[1],vertex[2]];
+  });
 }
 
 function setSnapping(enabled) {
@@ -1160,6 +1233,17 @@ canvas.addEventListener('pointerdown',event=>{
   if (state.drag || event.button > 2) return;
   const start=pointer(event);
   const tool=event.button === 1 ? (event.shiftKey?'pan':'orbit') : event.button === 2 ? 'pan' : state.tool;
+  if (tool==='arc' && state.arcPending) {
+    if (!state.doc || state.busy) return;
+    const pending=state.arcPending;
+    const candidate=drawingPoint(start,pending.a[2]);
+    const points=candidate?arcPoints(pending.a,pending.b,candidate.world):[];
+    if (!points.length) { status('Gerakkan kursor menjauh dari garis untuk menentukan lengkung busur.');return; }
+    state.arcPending=null;
+    addArc(points);
+    redraw();
+    return;
+  }
   if (tool === 'orbit' || tool === 'pan') {
     const axes=cameraAxes().map(axis=>[...axis]);
     const pivot=tool==='orbit'?orbitPivot(start):null;
@@ -1175,7 +1259,23 @@ canvas.addEventListener('pointerdown',event=>{
       if (object) { select(targetId(object)); removeObject(); }
       return;
     }
-    if (tool==='scale') {
+    if (tool==='offset') {
+      if (!object || state.inside || targetId(object)!==object.id || object.height!==0 || !['rectangle','circle'].includes(object.shape)) {
+        status('Offset tersedia untuk bidang persegi atau lingkaran datar di luar Group.');return;
+      }
+      const origin=ground(start,object.z);
+      if (!origin) {status('Gunakan denah atau tampilan 3D untuk Offset.');return;}
+      const outline=previewMesh(object).vertices.slice(0,object.shape==='circle'?48:4);
+      const area=outline.reduce((sum,p,i)=>{const q=outline[(i+1)%outline.length];return sum+p[0]*q[1]-q[0]*p[1]},0);
+      let nearest=null;
+      outline.forEach((a,i)=>{
+        const b=outline[(i+1)%outline.length],dx=b[0]-a[0],dy=b[1]-a[1];
+        const fraction=clamp(((origin[0]-a[0])*dx+(origin[1]-a[1])*dy)/(dx*dx+dy*dy),0,1);
+        const distance=Math.hypot(origin[0]-a[0]-fraction*dx,origin[1]-a[1]-fraction*dy);
+        if (!nearest || distance<nearest.distance) nearest={distance,normal:[(area>=0?1:-1)*dy/Math.hypot(dx,dy),-(area>=0?1:-1)*dx/Math.hypot(dx,dy)]};
+      });
+      state.drag={tool,start,object,origin,outline,normal:nearest.normal,elevation:object.z};
+    } else if (tool==='scale') {
       const id=targetId(object);
       const group=members(id);
       const sources=group.length?group:object?[object]:[];
@@ -1226,7 +1326,9 @@ canvas.addEventListener('pointerdown',event=>{
       if (tool==='move' && !origin) { status('Gunakan denah atau tampilan 3D untuk memindah.');return; }
       select(id);
       state.drag={tool,start,object,sources,owned,elevation,origin,anchor:anchor?.world??[...(origin||[0,0]),elevation]};
-    } else if (tool==='measure') {
+    } else if (tool==='arc' && state.inside) {
+      status('Keluar dari Edit isi sebelum menggambar busur.');return;
+    } else if (tool==='arc' || tool==='measure') {
       const initial=drawingPoint(start);
       if (!initial) { status('Gunakan denah atau tampilan 3D untuk mengukur.');return; }
       state.drag={tool,start,initial:initial.world};
@@ -1246,7 +1348,12 @@ canvas.addEventListener('pointermove',event=>{
   $('#coordinates').textContent=onGround ? 'X '+onGround[0].toFixed(2)+'  Y '+onGround[1].toFixed(2) : 'X —  Y —';
   const drag=state.drag;
   if (!drag) {
-    if (state.tool==='move') {
+    if (state.tool==='arc' && state.arcPending) {
+      const candidate=drawingPoint(point,state.arcPending.a[2]);
+      state.arcPending.preview=candidate?arcPoints(state.arcPending.a,state.arcPending.b,candidate.world):[];
+      state.inference=candidate?.label?candidate:null;
+      status('Klik untuk menetapkan lengkung busur. Esc untuk membatalkan.');
+    } else if (state.tool==='move') {
       const hovered=pickFace(point,true)?.object;
       const id=targetId(hovered);
       const owned=new Set(members(id).length?members(id).map(item=>item.id):hovered?[hovered.id]:[]);
@@ -1268,6 +1375,19 @@ canvas.addEventListener('pointermove',event=>{
   } else if (drag.tool==='pan') {
     camera.x=drag.camera.x+dx;
     camera.y=drag.camera.y+dy;
+  } else if (drag.tool==='offset') {
+    const end=ground(point,drag.elevation);
+    if (!end) {drag.contour=null;redraw();return;}
+    const raw=(end[0]-drag.origin[0])*drag.normal[0]+(end[1]-drag.origin[1])*drag.normal[1];
+    const limit=Math.min(drag.object.width,drag.object.depth)/2-.01;
+    drag.distance=clamp(state.snapping?snap(raw,.05):round(raw),-limit,100);
+    drag.contour=Math.abs(drag.distance)>.001?offsetOutline(drag.outline,drag.distance):null;
+    status('Offset '+drag.distance.toFixed(3)+' m');
+  } else if (drag.tool==='arc') {
+    const candidate=drawingPoint(point,drag.initial[2]);
+    drag.end=candidate?.world||null;
+    state.inference=candidate?.label?candidate:null;
+    if (drag.end) status('Klik berikutnya untuk menentukan lengkung busur.');
   } else if (drag.tool==='measure') {
     const candidate=drawingPoint(point,drag.initial[2]);
     if (!candidate) { drag.end=null;redraw();return; }
@@ -1346,7 +1466,11 @@ canvas.addEventListener('dblclick',event=>{
 canvas.addEventListener('pointerup',()=>{
   const drag=state.drag;
   state.drag=null;
-  if (drag?.preview) {
+  if (drag?.tool==='arc' && drag.end && Math.hypot(drag.end[0]-drag.initial[0],drag.end[1]-drag.initial[1])>.001) {
+    state.arcPending={a:drag.initial,b:drag.end,preview:[drag.initial,drag.end]};
+  } else if (drag?.tool==='offset' && drag.contour) {
+    addLineChain(drag.contour,true,'Kontur offset');
+  } else if (drag?.preview) {
     const object=drag.preview;
     const valid=object.shape==='line' ? Math.hypot(object.width,object.depth)>.001
       : object.width>.001 && object.depth>.001;
@@ -1362,6 +1486,9 @@ canvas.addEventListener('lostpointercapture',()=>{
   if (state.drag) { state.drag=null;redraw(); }
 });
 window.addEventListener('keydown',event=>{
+  if (event.key==='Escape' && state.arcPending) {
+    state.arcPending=null;state.inference=null;redraw();return;
+  }
   if (event.key==='Escape' && state.drag) {
     state.drag=null;redraw();return;
   }

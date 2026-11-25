@@ -18,7 +18,9 @@ cargo test --locked
 
 | Kebutuhan | Cara menggunakan |
 | --- | --- |
-| Menggambar | Pilih Garis (L), Persegi panjang (R), atau Lingkaran (C). Klik dan tarik. Snap mencari ujung, titik tengah, dan tepi yang terlihat. Jika tidak ada titik terdekat, Snap memakai grid 0,25 m. Titik awal menentukan elevasi gambar. |
+| Menggambar | Pilih Garis (L), Persegi panjang (R), atau Lingkaran (C). Klik dan tarik. Snap mencari ujung, titik tengah, dan tepi yang terlihat. Jika tidak ada titik terdekat, Snap memakai grid 0,25 m. Klik pada permukaan horizontal untuk menggambar pada elevasinya; di area kosong elevasi awal 0 m. |
+| Busur | Pilih Busur (A), tarik dari titik awal ke titik akhir, lalu gerakkan kursor dan klik untuk menetapkan kelengkungan. Busur disimpan sebagai rangkaian garis dalam satu operasi; Esc membatalkan langkah kedua. |
+| Offset | Pilih Offset (I) pada bidang datar persegi panjang atau lingkaran, lalu tarik ke dalam atau keluar. Kontur baru tersimpan sebagai garis sejajar. Offset belum memotong bidang asal atau membuat bukaan otomatis. |
 | Membentuk bidang | Hubungkan garis hingga menutup loop pada elevasi yang sama. Klik bagian dalam untuk memilih bidang dan klik tepi untuk memilih garis. Bidang memiliki properti dan dapat di-Push/Pull. Menambahkan garis pembagi memecah bidang otomatis yang masih mengikuti garis sumber. |
 | Membuat volume | Gunakan Push/Pull (P) di tampilan 3D. Tarik bidang atas untuk mengatur tinggi dengan langkah 0,05 m saat Snap aktif. Tinggi juga bisa diisi langsung. |
 | Mengedit objek | Pilih objek di kanvas atau daftar. Isi nama, dimensi, posisi, sudut rotasi, dan warna melalui properti. Gunakan Move (M) untuk menggeser sejajar bidang dasar. Hover ujung atau titik tengah objek sebelum menarik untuk memilih titik pegangan; arahkan titik itu ke snap objek lain pada elevasi yang sama. |
