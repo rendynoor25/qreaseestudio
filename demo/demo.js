@@ -2,7 +2,14 @@
 
 // Static Vercel preview: each browser stores its own editable copy of a room.
 document.querySelector('#demo-badge').hidden = false;
-document.querySelector('#share').hidden = true;
+document.querySelector('#share').addEventListener('click', () => {
+  if (window.qreaseeCloudPost) return;
+  queueMicrotask(() => {
+    document.querySelector('#share-feedback').textContent =
+      'Demo Vercel ini menyimpan model hanya di browser ini. Untuk uji bersama, buka ruang dari server Rust atau aktifkan penyimpanan Supabase.';
+  });
+});
+document.querySelector('#copy-link').disabled = true;
 
 const demoCopy = value => JSON.parse(JSON.stringify(value));
 const demoKey = room => 'qreasee-demo-room:' + room;

@@ -56,13 +56,17 @@ docker run --name qreasee-studio -p 127.0.0.1:8941:8941 -v qreasee-data:/data qr
 
 ## Demo statis di Vercel
 
-Jalankan `node scripts/build-demo.cjs` untuk menghasilkan folder `dist` berisi lima aset statis. Folder ini dapat di-deploy sebagai situs statis Vercel menggunakan konfigurasi `vercel.json`. Demo memakai proyek contoh dan menyimpan perubahan dalam `localStorage` browser pengunjung; tautan ruang tidak dapat dipakai untuk berbagi data antar-browser. Label `DEMO LOKAL` menandai batas ini dan tombol Bagikan tidak ditampilkan. Untuk kolaborasi online sungguhan, jalankan server Rust dengan penyimpanan bersama di layanan yang mendukung proses persisten atau migrasikan API dan data ke arsitektur serverless yang sesuai.
+Jalankan `node scripts/build-demo.cjs` untuk menghasilkan folder `dist` berisi aset statis. Folder ini dapat di-deploy ke Vercel menggunakan `vercel.json`. Tanpa mode cloud, demo memakai `localStorage` browser; tombol Bagikan menjelaskan batasnya dan penyalinan tautan ruang dinonaktifkan. Mode cloud di bawah menyimpan ruang di Supabase sehingga tautan yang sama membuka model yang sama di PC berbeda.
 
 Untuk menguji kolaborasi antara dua PC pada Wi-Fi yang sama, jalankan server Rust dengan `QREASEE_ADDR=0.0.0.0:8944` dan direktori `QREASEE_DATA` khusus demo. Buka `http://<IP-PC-SERVER>:8944/` pada kedua PC, buat ruang dari PC pertama, dan gunakan Bagikan untuk menyalin URL ruang yang sama. PC server harus tetap menyala; firewall Windows mungkin perlu mengizinkan koneksi masuk pada port 8944. Jangan memakai URL `127.0.0.1` di PC kedua karena alamat itu selalu menunjuk ke PC yang sedang digunakan.
 
 ## Konfigurasi Supabase
 
-Salin `.env.example` ke `.env.local`, lalu isi URL proyek dan publishable key dari Supabase. `.env.local` diabaikan Git. Jalankan `node scripts/check-supabase.cjs` untuk memeriksa koneksi tanpa mencetak key. Konfigurasi ini belum dipakai untuk menyimpan ruang atau autentikasi; editor tetap memakai server Rust, sedangkan demo Vercel memakai penyimpanan browser. Contoh Next.js `page.tsx`, helper SSR, dan middleware tidak digunakan karena Qreasee saat ini bukan aplikasi Next.js.
+Salin `.env.example` ke `.env.local`, lalu isi URL proyek dan publishable key dari Supabase. `.env.local` diabaikan Git. Jalankan `node scripts/check-supabase.cjs` untuk memeriksa koneksi tanpa mencetak key. Terapkan [`supabase/001_shared_rooms.sql`](supabase/001_shared_rooms.sql) sekali melalui SQL Editor di dashboard Supabase. Kunci publishable tidak punya izin untuk membuat tabel sendiri.
+
+Untuk build demo lintas internet, set `QREASEE_CLOUD_DEMO=1`, `NEXT_PUBLIC_SUPABASE_URL`, dan `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` sebagai variabel lingkungan build Vercel. Jalankan build ulang; jangan unggah `.env.local`. Pada build lokal, dua nilai Supabase boleh dibaca dari `.env.local`. `dist/cloud-config.js` berisi publishable key yang memang ditujukan untuk browser. Tabel tidak memberi akses langsung kepada `anon`; fungsi RPC menerima UUID ruang sebagai izin edit. Tautan harus dibagikan hanya kepada peserta uji. Mode ini masih prototipe: belum ada akun pengguna, izin per anggota, pembatasan pembuatan ruang, atau ketahanan untuk beban besar. Model dan kursor diperiksa tiap 1,5 detik. Pengeditan objek berbeda dapat bergabung; pengeditan objek atau lembar yang sama menampilkan konflik. Pembentukan bidang otomatis tetap memerlukan server Rust dan belum tersedia pada demo cloud.
+
+Qreasee saat ini bukan aplikasi Next.js, jadi helper SSR dan middleware Next.js tidak dipakai. Klien demo memanggil Supabase REST RPC langsung dari browser.
 
 Tautan ruang memberikan izin edit kepada siapa pun yang memegangnya. Versi ini belum memiliki akun, peran pengguna, riwayat revisi yang bisa dipulihkan, atau pengujian beban produksi. Untuk ruang privat, batasi akses di depan server dan gunakan tautan langsung hanya untuk peserta yang dipercaya. Simpan cadangan direktori data jika model diperlukan di kemudian hari.
 

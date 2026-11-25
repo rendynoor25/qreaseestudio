@@ -193,10 +193,10 @@ async function openRoom(createBlank) {
     state.room = id;
     history.replaceState(null, '', '#' + id);
     await sync();
-  } catch {
+  } catch (error) {
     if (state.epoch === epoch) {
       connection(false, 'Terputus');
-      status('Server tidak dapat dihubungi. Muat ulang halaman untuk mencoba lagi.');
+      status(error.message || 'Server tidak dapat dihubungi. Muat ulang halaman untuk mencoba lagi.');
     }
   }
 }
@@ -227,7 +227,8 @@ function accept(data) {
   const others=peers.filter(peer=>peer.id!==state.client).sort((a,b)=>a.id.localeCompare(b.id));
   const cursorChanged=JSON.stringify(state.peers)!==JSON.stringify(others);
   state.peers=others;
-  connection(true, window.qreaseeDemoPost ? 'Demo lokal' : peers.length + ' online');
+  connection(true, window.qreaseeCloudPost ? peers.length + ' online' :
+    window.qreaseeDemoPost ? 'Demo lokal' : peers.length + ' online');
   if (cursorChanged) {
     if (state.layout) drawLayoutCursors();
     else redraw();
@@ -1625,5 +1626,5 @@ $('#sheet').addEventListener('pointermove',event=>{
 $('#sheet').addEventListener('pointerleave',()=>{if (state.layout) state.cursor=null;});
 
 window.addEventListener('hashchange',()=>openRoom());
-setInterval(sync,350);
+setInterval(sync,window.qreaseeCloudPost?1500:350);
 openRoom();
