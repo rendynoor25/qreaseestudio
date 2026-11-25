@@ -787,21 +787,50 @@ function strokeLine(a,b,color,width=1) {
   ctx.stroke();
 }
 
+function clipNear(world) {
+  const [,,depth]=cameraAxes();
+  const near=.051;
+  const distance=point=>camera.distance-depth.reduce((sum,value,i)=>
+    sum+value*(point[i]-camera.center[i]),0);
+  const values=world.map(distance);
+  if (values.every(value=>value>=near)) return world;
+  if (values.every(value=>value<near)) return [];
+  const crossing=(a,b,da,db)=>a.map((value,i)=>
+    value+(b[i]-value)*(near-da)/(db-da));
+  if (world.length===2) {
+    const cut=crossing(world[0],world[1],values[0],values[1]);
+    return values[0]>=near ? [world[0],cut] : [cut,world[1]];
+  }
+  const clipped=[];
+  for (let i=0;i<world.length;i++) {
+    const previous=(i+world.length-1)%world.length;
+    const inside=values[i]>=near, wasInside=values[previous]>=near;
+    if (inside!==wasInside) clipped.push(crossing(world[previous],world[i],values[previous],values[i]));
+    if (inside) clipped.push(world[i]);
+  }
+  return clipped;
+}
+
 function scene(meshes, objects, projection) {
   const faces = [];
+  const clip=projection===stagePoint && camera.perspective;
   meshes.forEach((mesh,index) => {
     if (!mesh.vertices.length) return;
     const projected = mesh.vertices.map(projection);
     const object = objects[index];
     const entries = mesh.faces.length ? mesh.faces : [[0,1]];
     for (const face of entries) {
-      const points = face.map(i => projected[i]);
+      const world=face.map(i=>mesh.vertices[i]);
+      const visible=clip?clipNear(world):world;
+      if (visible.length<Math.min(face.length,3)) continue;
+      const points=visible===world?face.map(i=>projected[i]):visible.map(projection);
       if (points.some(point=>!Number.isFinite(point[0]))) continue;
       const area = points.reduce((sum,p,i) => {
         const q = points[(i+1)%points.length];
         return sum + p[0]*q[1]-q[0]*p[1];
       },0);
-      if (face.length > 2 && (Math.abs(area) < 1e-6 || (area > 0 && object.height))) continue;
+      if (face.length > 2 && (Math.abs(area) < 1e-6 ||
+        (projection!==stagePoint && area>0 && object.height))) continue;
       let tone = 1, top = false;
       if (mesh.faces.length) {
         const heights = face.map(i => mesh.vertices[i][2]);
@@ -812,11 +841,11 @@ function scene(meshes, objects, projection) {
         }
       }
       const ring=object.profile?.points.length;
-      const edges=ring && face.length===3 ? face.map((index,i)=>{
+      const edges=visible===world && ring && face.length===3 ? face.map((index,i)=>{
         const delta=Math.abs(index%ring-face[(i+1)%face.length]%ring);
         return delta===1 || delta===ring-1;
       }) : null;
-      faces.push({object,points,edges,world:face.map(i=>mesh.vertices[i]),top,tone,cut:mesh.cut,depth:points.reduce((sum,p) => sum+p[2],0)/points.length});
+      faces.push({object,points,edges,world:visible,top,tone,cut:mesh.cut,depth:points.reduce((sum,p) => sum+p[2],0)/points.length});
     }
   });
   return orderFaces(faces);
