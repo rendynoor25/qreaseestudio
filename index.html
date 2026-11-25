@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qreasee Studio</title>
+  <link rel="stylesheet" href="./studio.css">
+  <script src="./demo.js" defer></script>
+  <script src="./cloud-config.js" defer></script>
+  <script src="./cloud.js" defer></script>
+  <script src="./studio.js" defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <span id="demo-badge" hidden title="Perubahan disimpan di browser ini; kolaborasi online tidak aktif">DEMO LOKAL</span>
+    <div class="identity">
+      <span class="logo" data-icon="logo" aria-hidden="true"></span>
+      <span class="wordmark">qreasee<span> studio</span></span>
+    </div>
+    <div class="project">
+      <span data-icon="folder" aria-hidden="true"></span>
+      <strong id="project-title">Qreasee Studio</strong>
+      <details id="file-menu">
+        <summary title="Menu proyek" aria-label="Menu proyek" data-icon="chevron"></summary>
+        <div class="dropdown">
+          <button id="new-project">Proyek kosong</button>
+          <button id="demo-project">Buka contoh baru</button>
+          <button id="export-obj">Unduh model OBJ</button>
+          <button id="export-json">Unduh data proyek</button>
+        </div>
+      </details>
+    </div>
+    <nav class="modes" aria-label="Ruang kerja">
+      <button id="model-tab" aria-pressed="true"><span data-icon="cube"></span>Model</button>
+      <button id="layout-tab" aria-pressed="false"><span data-icon="page"></span>Layout</button>
+    </nav>
+    <div class="collaboration">
+      <div class="avatars" id="avatars" aria-label="Editor aktif"></div>
+      <button class="share" id="share"><span data-icon="users"></span> Bagikan</button>
+    </div>
+  </header>
+  <div class="actionbar">
+    <div id="model-tools" class="action-group">
+      <div id="tool-buttons" class="action-group"></div>
+      <span class="separator"></span>
+      <button class="icon-button" id="undo" title="Urungkan (Ctrl+Z)" aria-label="Urungkan" data-icon="undo"></button>
+      <button class="icon-button" id="redo" title="Ulangi (Ctrl+Shift+Z)" aria-label="Ulangi" data-icon="redo"></button>
+      <span class="separator"></span>
+      <button class="text-button" id="snap-toggle" aria-pressed="true"><span data-icon="snap"></span> Snap</button>
+      <button class="text-button" id="make-group" title="Pilih beberapa objek dengan Shift + klik"><span data-icon="group"></span> Group</button>
+      <button class="text-button" id="make-component"><span data-icon="cube"></span> Component</button>
+    </div>
+    <div id="layout-tools" class="action-group" hidden>
+      <span data-icon="page"></span><strong>Lembar gambar</strong><span class="separator"></span><span>A3 Lanskap</span>
+    </div>
+    <div class="action-group right">
+      <span id="connection"><i></i><span>Menghubungkan</span></span>
+      <button class="text-button" id="fit" title="Paskan model ke layar (F)"><span data-icon="fit"></span><span>Paskan</span></button>
+      <button class="share" id="print" hidden><span data-icon="download"></span> Cetak / PDF</button>
+    </div>
+  </div>
+  <main class="workspace">
+    <aside class="sidebar left-sidebar">
+      <div class="pane-heading"><h1 id="left-title">Struktur model</h1><span id="left-icon" data-icon="layers"></span></div>
+      <div id="model-tree">
+        <label class="search"><span data-icon="search"></span><input id="search" type="search" placeholder="Cari objek" aria-label="Cari objek"></label>
+        <div class="tree-root"><span data-icon="vchevron"></span><span data-icon="folder"></span> <strong>Objek model</strong><span id="object-count"></span></div>
+        <div id="objects"></div>
+      </div>
+      <div id="layout-tree" hidden>
+        <div class="sheet-item"><span data-icon="page"></span><div><b id="sheet-code">A-101</b><small>Lembar arsitektur</small></div></div>
+        <div class="tree-root"><span data-icon="layers"></span><strong>Tampilan tertaut</strong></div>
+        <ul class="view-list"><li>Denah</li><li>Tampak depan</li><li>Tampak kanan</li><li>Aksonometri</li></ul>
+      </div>
+      <div class="sidebar-foot"><span data-icon="ruler"></span> Satuan meter</div>
+    </aside>
+    <section class="stage" id="model-stage" aria-label="Kanvas model">
+      <canvas id="viewport" aria-label="Kanvas model 3D"></canvas>
+      <div class="stage-top">
+        <div class="view-control">
+          <span data-icon="cube"></span>
+          <select id="camera" aria-label="Tampilan kamera">
+            <option value="perspective">Perspektif</option><option value="iso">Aksonometri</option><option value="plan">Denah</option>
+            <option value="front">Tampak depan</option><option value="right">Tampak kanan</option>
+          </select>
+        </div>
+        <div class="orientation" id="orientation" aria-label="Arah sumbu"></div>
+      </div>
+      <div class="stage-bottom">
+        <div class="hint-stack"><span id="tool-hint"></span><span id="snap-feedback" aria-live="off"></span></div>
+        <div class="grid-control"><button id="zoom-out" title="Perkecil" aria-label="Perkecil" data-icon="minus"></button><span id="zoom-label">100%</span><button id="zoom-in" title="Perbesar" aria-label="Perbesar" data-icon="plus"></button></div>
+      </div>
+    </section>
+    <section class="stage layout-stage" id="layout-stage" aria-label="Pratinjau lembar gambar" hidden>
+      <svg id="sheet" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 297" aria-label="Lembar arsitektur A3"></svg>
+    </section>
+    <aside class="sidebar inspector">
+      <div class="pane-heading"><h2 id="inspector-title">Properti objek</h2><span data-icon="sliders"></span></div>
+      <div id="model-inspector">
+        <p id="select-prompt">Pilih objek di kanvas atau dari daftar untuk mengedit propertinya.</p>
+        <div id="container-panel" hidden>
+          <div class="object-name"><span id="container-glyph" data-icon="group"></span><div><strong id="container-title"></strong><small id="container-kind"></small></div></div>
+          <div class="form-section">
+            <button id="edit-container" class="primary-outlined">Edit isi</button>
+            <button id="copy-container" class="primary-outlined">Duplikat</button>
+            <button id="explode-container" class="primary-outlined">Urai</button>
+            <button id="remove-container" class="danger">Hapus</button>
+          </div>
+        </div>
+        <button class="text-button" id="exit-container" hidden>Keluar dari edit isi</button>
+        <form id="object-form" hidden>
+          <div class="object-name"><span id="object-glyph" data-icon="cube"></span><div><strong id="selection-title"></strong><small id="selection-kind"></small></div></div>
+          <div class="form-section">
+            <label>Nama objek<input name="name" maxlength="64" required></label>
+            <h3>Dimensi <span>m</span></h3>
+            <div class="field-grid dimension-grid">
+              <label>Panjang<input name="width" type="number" step="any" required></label>
+              <label>Lebar<input name="depth" type="number" step="any" required></label>
+              <label>Tinggi<input name="height" type="number" step="any" required></label>
+            </div>
+            <h3>Posisi <span>m</span></h3>
+            <div class="field-grid">
+              <label>X<input name="x" type="number" step="any" required></label>
+              <label>Y<input name="y" type="number" step="any" required></label>
+              <label>Z<input name="z" type="number" step="any" required></label>
+            </div>
+            <div class="field-grid material-grid">
+              <label title="Sudut positif berlawanan arah jarum jam pada denah">Rotasi °<input name="rotation" type="number" step="any" required></label>
+              <label>Material<input name="color" type="color"></label>
+            </div>
+            <button type="submit" class="primary-outlined">Terapkan perubahan</button>
+          </div>
+          <div class="object-actions">
+            <button type="button" id="duplicate"><span data-icon="copy"></span> Duplikat</button>
+            <button type="button" id="delete" class="danger"><span data-icon="trash"></span> Hapus</button>
+          </div>
+        </form>
+      </div>
+      <div id="layout-inspector" hidden>
+        <form id="sheet-form" class="form-section">
+          <label>Judul proyek<input name="title" maxlength="80" required></label>
+          <label>Nomor gambar<input name="number" maxlength="20" required></label>
+          <label>Skala ortografis<select name="scale">
+            <option value="25">1:25</option><option value="50">1:50</option><option value="75">1:75</option><option value="100">1:100</option><option value="150">1:150</option><option value="200">1:200</option><option value="500">1:500</option>
+          </select></label>
+          <label>Elevasi potong denah (m)<input name="cut_height" type="number" step="any" required></label>
+          <label>Catatan<textarea name="notes" rows="4" maxlength="200"></textarea></label>
+          <p id="scale-note"></p>
+          <button class="primary-outlined" type="submit">Simpan lembar</button>
+        </form>
+      </div>
+    </aside>
+  </main>
+  <footer><span id="status">Membuka proyek…</span><span id="revision"></span><span id="coordinates">X — &nbsp; Y —</span></footer>
+  <dialog id="share-dialog">
+    <form method="dialog" class="dialog-head"><h2>Bagikan proyek</h2><button aria-label="Tutup" data-icon="close"></button></form>
+    <p>Siapa pun dengan tautan ini dapat mengedit proyek di server yang sama.</p>
+    <label>Nama tampilan<input type="text" id="display-name" maxlength="32"></label>
+    <label>Tautan ruang<input id="share-link" readonly></label>
+    <button class="share" id="copy-link"><span data-icon="copy"></span> Salin tautan</button>
+    <p id="share-feedback" role="status"></p>
+  </dialog>
+  <dialog id="container-dialog">
+    <form method="dialog" id="container-form">
+      <div class="dialog-head"><h2 id="create-title"></h2><button type="button" id="cancel-container" aria-label="Tutup" data-icon="close"></button></div>
+      <label>Nama<input id="container-name" maxlength="64" required></label>
+      <button class="share" type="submit">Buat</button>
+    </form>
+  </dialog>
+</body>
+</html>
