@@ -111,11 +111,11 @@ let frame = 0;
 for (const [id, [label, key]] of Object.entries(tools)) {
   const button = document.createElement('button');
   button.className = 'icon-button';
-  button.title = label + ' (' + key + ')';
+  button.title = label + ' (' + (id==='select'?'Space / V':key) + ')';
   button.setAttribute('aria-label', label);
   button.dataset.tool = id;
   icon(button, id);
-  button.onclick = () => setTool(id);
+  button.onclick = () => {setTool(id);canvas.focus({preventScroll:true});};
   $('#tool-buttons').append(button);
 }
 
@@ -1689,21 +1689,30 @@ canvas.addEventListener('lostpointercapture',()=>{
   if (state.drag) { state.drag=null;redraw(); }
 });
 window.addEventListener('keydown',event=>{
-  if (event.key==='Escape' && !$('#account-menu').hidden) { accountMenu(false);return; }
-  if (event.key==='Escape' && state.arcPending) {
-    state.arcPending=null;state.inference=null;redraw();return;
+  const dialog=document.querySelector('dialog[open]');
+  const typing=['INPUT','TEXTAREA','SELECT'].includes(event.target.tagName) || event.target.isContentEditable;
+  if (event.key==='Escape') {
+    if (dialog) return;
+    if (!$('#account-menu').hidden) {accountMenu(false);return;}
+    if (state.drag) {state.drag=null;state.inference=null;setTool('select');redraw();return;}
+    if (state.arcPending) {state.arcPending=null;state.inference=null;setTool('select');redraw();return;}
+    if (typing) return;
+    if (state.inside) {exitContainer();return;}
+    if (!state.layout && state.tool!=='select') {setTool('select');state.inference=null;redraw();return;}
+    if (state.selected.size) select(null);
+    return;
   }
-  if (event.key==='Escape' && state.drag) {
-    state.drag=null;redraw();return;
-  }
-  if (event.key==='Escape' && state.inside && !document.querySelector('dialog[open]')) { exitContainer();return; }
-  if (document.querySelector('dialog[open]') ||
-      ['INPUT','TEXTAREA','SELECT','BUTTON','SUMMARY'].includes(event.target.tagName)) return;
+  if (dialog || typing || ['BUTTON','SUMMARY'].includes(event.target.tagName)) return;
   const key=event.key.toUpperCase();
   if ((event.ctrlKey||event.metaKey) && ['Z','Y'].includes(key)) {
     event.preventDefault();reverse(event.shiftKey||key==='Y');return;
   }
   if (state.layout || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.code==='Space') {
+    event.preventDefault();
+    state.drag=null;state.inference=null;
+    setTool('select');redraw();return;
+  }
   if (key==='DELETE' || key==='BACKSPACE') { event.preventDefault();removeObject();return; }
   if (key==='F') { fit();return; }
   if (key==='G' || key==='Q') { event.preventDefault();createContainer(key==='Q');return; }
