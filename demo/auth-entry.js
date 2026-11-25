@@ -14,22 +14,6 @@ let currentUser = null;
 function showAccount(user) {
   currentUser = user;
   gate.hidden = true;
-  const account = document.createElement('div');
-  account.className = 'auth-account';
-  const label = document.createElement('span');
-  label.textContent = user.user_metadata?.full_name || user.email || 'Akun Google';
-  label.title = user.email || label.textContent;
-  const signOut = document.createElement('button');
-  signOut.type = 'button';
-  signOut.textContent = 'Keluar';
-  signOut.onclick = async () => {
-    signOut.disabled = true;
-    const { error } = await supabase.auth.signOut();
-    if (error) { message.textContent = error.message; signOut.disabled = false; return; }
-    location.reload();
-  };
-  account.append(label, signOut);
-  document.querySelector('.collaboration').prepend(account);
 }
 
 login.onclick = async () => {
@@ -74,5 +58,10 @@ window.qreaseeAuth = {
   },
   get displayName() {
     return currentUser?.user_metadata?.full_name || currentUser?.email || 'Akun Google';
+  },
+  async signOut() {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+    location.reload();
   }
 };

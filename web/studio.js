@@ -144,6 +144,72 @@ $('#browser-toggle').onclick=()=>panel('objects',$('#object-panel').hidden);
 $('#browser-close').onclick=()=>panel('objects',false);
 $('#inspector-toggle').onclick=()=>panel('inspector',$('#inspector').hidden);
 $('#inspector-close').onclick=()=>panel('inspector',false);
+let railWidth=Number(localStorage.getItem('qreasee-rail-width'))||52;
+let inspectorWidth=Number(localStorage.getItem('qreasee-inspector-width'))||263;
+function resizePanel(kind,value) {
+  const workspace=$('#workspace');
+  const rail=kind==='rail';
+  const minimum=rail?52:220;
+  const maximum=rail?140:480;
+  const reserved=rail
+    ? ($('#object-panel').hidden?0:225)+($('#inspector').hidden?0:inspectorWidth)
+    : railWidth+($('#object-panel').hidden?0:225);
+  const limit=Math.max(minimum,Math.min(maximum,workspace.clientWidth-reserved-260));
+  const width=clamp(Math.round(value),minimum,limit);
+  if (rail) railWidth=width;
+  else inspectorWidth=width;
+  workspace.style.setProperty(rail?'--rail-width':'--inspector-width',width+'px');
+  workspace.classList.toggle('wide-tools',railWidth>=94);
+  $('#'+(rail?'rail-resize':'inspector-resize')).setAttribute('aria-valuenow',String(width));
+  localStorage.setItem(rail?'qreasee-rail-width':'qreasee-inspector-width',String(width));
+  redraw();
+}
+function installResize(kind) {
+  const handle=$('#'+(kind==='rail'?'rail-resize':'inspector-resize'));
+  let dragging=false;
+  handle.onpointerdown=event=>{
+    if (event.button!==0) return;
+    dragging=true;
+    handle.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+  handle.onpointermove=event=>{
+    if (!dragging) return;
+    const box=$('#workspace').getBoundingClientRect();
+    resizePanel(kind,kind==='rail'?event.clientX-box.left:box.right-event.clientX);
+  };
+  handle.onpointerup=()=>{dragging=false;};
+  handle.onlostpointercapture=()=>{dragging=false;};
+  handle.onkeydown=event=>{
+    if (!['ArrowLeft','ArrowRight'].includes(event.key)) return;
+    event.preventDefault();
+    const direction=event.key==='ArrowRight'?1:-1;
+    resizePanel(kind,(kind==='rail'?railWidth:inspectorWidth)+(kind==='rail'?direction:-direction)*10);
+  };
+}
+resizePanel('rail',railWidth);
+resizePanel('inspector',inspectorWidth);
+installResize('rail');
+installResize('inspector');
+
+function accountMenu(open) {
+  $('#account-menu').hidden=!open;
+  const own=$('#avatars .self-avatar');
+  if (own) own.setAttribute('aria-expanded',String(open));
+  if (open) {
+    $('#account-name').textContent=window.qreaseeAuth?.displayName || state.name;
+    $('#sign-out').hidden=!window.qreaseeAuth?.signOut;
+  }
+}
+$('#sign-out').onclick=async()=>{
+  const button=$('#sign-out');
+  button.disabled=true;
+  try { await window.qreaseeAuth.signOut(); }
+  catch (error) { status(error.message || 'Gagal keluar.');button.disabled=false; }
+};
+document.addEventListener('pointerdown',event=>{
+  if (!$('#account-menu').hidden && !event.target.closest('.avatar-area')) accountMenu(false);
+});
 $('#tree-toggle').onclick=()=>{
   const open=$('#objects').hidden;
   $('#objects').hidden=!open;
@@ -253,6 +319,7 @@ async function openRoom(createBlank) {
   $('#project-title').textContent = 'Qreasee';
   $('#revision').textContent = '';
   $('#avatars').replaceChildren();
+  accountMenu(false);
   delete $('#avatars').dataset.signature;
   refresh(true);
   try {
@@ -310,9 +377,16 @@ function accept(data) {
 
 function renderAvatars(avatars,peers) {
   for (const peer of peers.slice(0, 4)) {
-    const item = document.createElement('span');
-    item.className = 'avatar';
-    item.title = (peer.name || 'Tamu') + (peer.id === state.client ? ' (Anda)' : '');
+    const own=peer.id===state.client;
+    const item = document.createElement(own?'button':'span');
+    item.className = 'avatar'+(own?' self-avatar':'');
+    item.title = (own?window.qreaseeAuth?.displayName:peer.name) || 'Tamu';
+    if (own) {
+      item.type='button';
+      item.setAttribute('aria-label','Akun saya');
+      item.setAttribute('aria-expanded','false');
+      item.onclick=()=>accountMenu($('#account-menu').hidden);
+    }
     item.textContent = (peer.name || 'Tamu').split(/\s+/).slice(0,2).map(word => [...word][0]).join('').toUpperCase();
     avatars.append(item);
   }
@@ -1615,6 +1689,7 @@ canvas.addEventListener('lostpointercapture',()=>{
   if (state.drag) { state.drag=null;redraw(); }
 });
 window.addEventListener('keydown',event=>{
+  if (event.key==='Escape' && !$('#account-menu').hidden) { accountMenu(false);return; }
   if (event.key==='Escape' && state.arcPending) {
     state.arcPending=null;state.inference=null;redraw();return;
   }
