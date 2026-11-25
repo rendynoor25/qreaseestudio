@@ -51,7 +51,13 @@
       <label class="header-search"><span data-icon="search"></span><input id="search" type="search" placeholder="Cari objek" aria-label="Cari objek"></label>
       <button class="header-tool" id="theme-toggle" title="Ganti tema" aria-label="Ganti tema" data-icon="moon"></button>
       <span id="connection"><i></i><span>Menghubungkan</span></span>
-      <div class="avatars" id="avatars" aria-label="Editor aktif"></div>
+      <div class="avatar-area">
+        <div class="avatars" id="avatars" aria-label="Editor aktif"></div>
+        <div id="account-menu" class="account-menu" hidden>
+          <strong id="account-name"></strong>
+          <button id="sign-out" hidden>Keluar</button>
+        </div>
+      </div>
       <button class="header-tool" id="inspector-toggle" title="Tampilkan properti" aria-label="Tampilkan properti" aria-expanded="false" aria-controls="inspector" data-icon="sliders"></button>
       <button class="share" id="share"><span data-icon="users"></span> Bagikan</button>
     </div>
@@ -62,6 +68,7 @@
       <div id="tool-buttons"></div>
       <button class="rail-toggle rail-bottom" id="fit" title="Paskan model ke layar (F)" aria-label="Paskan model" data-icon="fit"></button>
       <button class="rail-toggle rail-bottom" id="print" title="Cetak / PDF" aria-label="Cetak / PDF" data-icon="download" hidden></button>
+      <div id="rail-resize" class="resize-handle rail-resize" role="separator" tabindex="0" aria-label="Ubah lebar bilah alat" aria-orientation="vertical" aria-valuemin="52" aria-valuemax="140" aria-valuenow="52" title="Tarik untuk mengubah lebar bilah alat"></div>
     </aside>
     <aside class="sidebar object-panel" id="object-panel" hidden>
       <div class="pane-heading"><h1 id="left-title">Struktur model</h1><button id="browser-close" aria-label="Tutup struktur model" data-icon="close"></button></div>
@@ -96,6 +103,7 @@
       <svg id="sheet" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 297" aria-label="Lembar arsitektur A3"></svg>
     </section>
     <aside class="sidebar inspector" id="inspector" hidden>
+      <div id="inspector-resize" class="resize-handle inspector-resize" role="separator" tabindex="0" aria-label="Ubah lebar properti" aria-orientation="vertical" aria-valuemin="220" aria-valuemax="480" aria-valuenow="263" title="Tarik untuk mengubah lebar properti"></div>
       <div class="pane-heading"><h2 id="inspector-title">Properti objek</h2><button id="inspector-close" aria-label="Tutup properti" data-icon="close"></button></div>
       <div id="model-inspector">
         <p id="select-prompt">Pilih objek di kanvas atau dari daftar untuk mengedit propertinya.</p>

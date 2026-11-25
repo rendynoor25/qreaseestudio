@@ -5,12 +5,6 @@
 .auth-card button{width:100%;padding:11px;border:0;border-radius:8px;background:#f0913b;color:#1a1009;font-weight:700;cursor:pointer}
 .auth-card button:disabled{opacity:.6;cursor:wait}
 #auth-message{min-height:1.5em;margin-bottom:0;color:#f7b77c}
-.auth-account{display:flex;align-items:center;gap:7px;max-width:190px;color:#c9d1db;font-size:12px}
-.auth-account span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.auth-account button{background:transparent;border:1px solid #454d58;border-radius:5px;color:#c9d1db;cursor:pointer;padding:4px 6px}
-@media(max-width:900px){.auth-account span{display:none}}
 body[data-theme=light] #auth-gate{background:#e7e9ec}
 body[data-theme=light] .auth-card{background:#fff;border-color:#d3d9e1;box-shadow:0 20px 70px #26313d25}
 body[data-theme=light] .auth-card p{color:#5e6978}
-body[data-theme=light] .auth-account{color:#344253}
-body[data-theme=light] .auth-account button{color:#344253;border-color:#cbd2db}
