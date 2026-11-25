@@ -123,6 +123,9 @@ dialog label{margin:12px 0}
 #viewport[data-tool=line],#viewport[data-tool=rectangle],#viewport[data-tool=circle]{cursor:crosshair}
 #viewport[data-tool=move],#viewport[data-tool=pan],#viewport[data-tool=orbit]{cursor:grab}
 #viewport[data-tool=pull]{cursor:ns-resize}
+#viewport[data-tool=scale]{cursor:nwse-resize}
+#viewport[data-tool=erase]{cursor:cell}
+#viewport[data-tool=measure]{cursor:crosshair}
 .hint-stack{display:flex;align-items:center;gap:6px;min-width:0}
 #snap-feedback{padding:5px 8px;background:#e4f6ef;border:1px solid #87b6a6;color:#185847;border-radius:6px;font-size:11px;white-space:nowrap}
 #snap-feedback:empty{display:none}

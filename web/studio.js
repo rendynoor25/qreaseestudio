@@ -30,6 +30,9 @@ const icons = {
   pull:'<path d="m3 15 9 5 9-5-4-2m-14 2 4-2m5 3V4m-4 4 4-4 4 4"/>',
   move:'<path d="M12 3v18M3 12h18M9 6l3-3 3 3m-6 12 3 3 3-3M6 9l-3 3 3 3m12-6 3 3-3 3"/>',
   rotate:'<path d="M20 10a8 8 0 1 0-2 8M20 4v6h-6"/><circle cx="12" cy="12" r="1"/>',
+  scale:'<path d="M4 20 20 4M4 14v6h6M14 4h6v6"/><rect x="2" y="18" width="4" height="4"/><rect x="18" y="2" width="4" height="4"/>',
+  erase:'<path d="m3 15 9-10a2 2 0 0 1 3 0l6 6a2 2 0 0 1 0 3l-7 7H8zM9 21h12"/>',
+  measure:'<path d="M3 17 17 3l4 4L7 21zM9 11l2 2m1-5 2 2m1-5 2 2"/>',
   orbit:'<ellipse cx="12" cy="12" rx="9" ry="5.5" transform="rotate(-28 12 12)"/><path d="M8 4a8 8 0 0 1 12 5m-2-4 2 4 2-4M10 20a8 8 0 0 1-6-5"/>',
   pan:'<path d="M8 13V6a1.5 1.5 0 0 1 3 0v5-7a1.5 1.5 0 0 1 3 0v7-5a1.5 1.5 0 0 1 3 0v6-3a1.5 1.5 0 0 1 3 0v6c0 4-2 6-6 6h-2a5 5 0 0 1-4-2l-4-5a1.6 1.6 0 0 1 2.5-2z"/>',
   download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/>'
@@ -47,6 +50,9 @@ const tools = {
   pull: ['Push/Pull', 'P', 'Tarik bidang atas ke atas atau ke bawah'],
   move: ['Pindah', 'M', 'Tarik objek sejajar bidang dasar'],
   rotate: ['Rotate', 'Q', 'Tarik mengelilingi pusat objek untuk memutar pada sumbu Z'],
+  scale: ['Skala', 'S', 'Tarik dari objek untuk mengubah ukurannya secara proporsional'],
+  erase: ['Penghapus', 'E', 'Klik objek untuk menghapus; Ctrl+Z untuk mengurungkan'],
+  measure: ['Ukur', 'T', 'Tarik antara dua titik untuk membaca jarak pada bidang gambar'],
   orbit: ['Orbit', 'O', 'Tarik untuk memutar kamera'],
   pan: ['Geser kamera', 'H', 'Tarik untuk menggeser kamera']
 };
@@ -930,6 +936,17 @@ function draw() {
     if (mesh.faces.length) { ctx.fillStyle = '#f0913b38'; ctx.fill(); }
     ctx.strokeStyle = '#bf671c'; ctx.lineWidth = 1.5; ctx.stroke();
   }
+  if (drag?.tool==='measure' && drag.end) {
+    const a=stagePoint(drag.initial), b=stagePoint(drag.end);
+    if (Number.isFinite(a[0]) && Number.isFinite(b[0])) {
+      strokeLine(a,b,'#bf671c',2);
+      for (const [x,y] of [a,b]) { ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#bf671c';ctx.stroke(); }
+      const label=drag.distance.toFixed(3)+' m';
+      ctx.font='bold 12px Segoe UI, sans-serif';
+      ctx.fillStyle='#fff';ctx.fillRect((a[0]+b[0])/2-5,(a[1]+b[1])/2-18,ctx.measureText(label).width+10,19);
+      ctx.fillStyle='#703b11';ctx.fillText(label,(a[0]+b[0])/2,(a[1]+b[1])/2-4);
+    }
+  }
   if (drag?.tool==='rotate') {
     const pivot=stagePoint(drag.pivot);
     if (Number.isFinite(pivot[0])) {
@@ -1096,7 +1113,26 @@ canvas.addEventListener('pointerdown',event=>{
     const face=pickFace(start,tool!=='pull');
     if (tool==='select') { select(targetId(face?.object),event.shiftKey); return; }
     const object=face?.object;
-    if (tool==='rotate') {
+    if (tool==='erase') {
+      if (object) { select(targetId(object)); removeObject(); }
+      return;
+    }
+    if (tool==='scale') {
+      const id=targetId(object);
+      const group=members(id);
+      const sources=group.length?group:object?[object]:[];
+      if (!sources.length || (group.length && group[0].container.definition)) {
+        status('Pilih objek atau Group. Untuk Component, gunakan Edit isi.');
+        return;
+      }
+      const pivot=[sources.reduce((sum,item)=>sum+item.x,0)/sources.length,
+        sources.reduce((sum,item)=>sum+item.y,0)/sources.length];
+      const initial=ground(start,object.z);
+      const radius=initial && Math.hypot(initial[0]-pivot[0],initial[1]-pivot[1]);
+      if (!radius || radius<.01) { status('Mulai tarik di luar pusat objek.'); return; }
+      select(id);
+      state.drag={tool,start,object,sources,pivot,radius,elevation:object.z};
+    } else if (tool==='rotate') {
       const id=targetId(object);
       const group=members(id);
       const sources=group.length?group:object?[object]:[];
@@ -1132,6 +1168,10 @@ canvas.addEventListener('pointerdown',event=>{
       if (tool==='move' && !origin) { status('Gunakan denah atau tampilan 3D untuk memindah.');return; }
       select(id);
       state.drag={tool,start,object,sources,owned,elevation,origin,anchor:anchor?.world??[...(origin||[0,0]),elevation]};
+    } else if (tool==='measure') {
+      const initial=drawingPoint(start);
+      if (!initial) { status('Gunakan denah atau tampilan 3D untuk mengukur.');return; }
+      state.drag={tool,start,initial:initial.world};
     } else {
       const initial=drawingPoint(start);
       if (!initial) { status('Gunakan denah atau aksonometri untuk menggambar.');return; }
@@ -1162,6 +1202,24 @@ canvas.addEventListener('pointermove',event=>{
   } else if (drag.tool==='pan') {
     camera.x=drag.camera.x+dx;
     camera.y=drag.camera.y+dy;
+  } else if (drag.tool==='measure') {
+    const candidate=drawingPoint(point,drag.initial[2]);
+    if (!candidate) { drag.end=null;redraw();return; }
+    drag.end=candidate.world;
+    drag.distance=Math.hypot(drag.end[0]-drag.initial[0],drag.end[1]-drag.initial[1]);
+    state.inference=candidate.label?candidate:null;
+    status('Jarak '+drag.distance.toFixed(3)+' m');
+  } else if (drag.tool==='scale') {
+    const end=ground(point,drag.elevation);
+    if (!end) { drag.updates=null;redraw();return; }
+    const ratio=clamp(Math.hypot(end[0]-drag.pivot[0],end[1]-drag.pivot[1])/drag.radius,.01,100);
+    const factor=state.snapping?Math.max(.05,snap(ratio,.05)):ratio;
+    drag.updates=drag.sources.map(object=>({...object,
+      x:drag.pivot[0]+(object.x-drag.pivot[0])*factor,
+      y:drag.pivot[1]+(object.y-drag.pivot[1])*factor,
+      width:object.width*factor,depth:object.depth*factor,height:object.height*factor
+    }));
+    status('Skala '+factor.toFixed(2)+'×');
   } else if (drag.tool==='rotate') {
     const end=ground(point,drag.pivot[2]);
     if (!end) { drag.updates=null;redraw();return; }
@@ -1225,7 +1283,7 @@ canvas.addEventListener('pointerup',()=>{
       : object.width>.001 && object.depth>.001;
     if (valid) addObject(object);
   } else if (drag?.updates && drag.updates.some((object,i)=>JSON.stringify(object)!==JSON.stringify(drag.sources[i]))) {
-    if (['move','rotate'].includes(drag.tool) && targetId(drag.object)!==drag.object.id) {
+    if (['move','rotate','scale'].includes(drag.tool) && targetId(drag.object)!==drag.object.id) {
       batch(drag.sources,drag.updates,[targetId(drag.object)]);
     } else edit(drag.object,drag.updates[0]);
   }

@@ -23,6 +23,9 @@ cargo test --locked
 | Membuat volume | Gunakan Push/Pull (P) di tampilan 3D. Tarik bidang atas untuk mengatur tinggi dengan langkah 0,05 m saat Snap aktif. Tinggi juga bisa diisi langsung. |
 | Mengedit objek | Pilih objek di kanvas atau daftar. Isi nama, dimensi, posisi, sudut rotasi, dan warna melalui properti. Gunakan Move (M) untuk menggeser sejajar bidang dasar. |
 | Rotate | Pilih Rotate (Q) dan tarik mengelilingi pusat objek atau Group. Sudut positif di panel properti memutar berlawanan arah jarum jam pada denah. |
+| Skala | Pilih Skala (S), lalu tarik dari bagian objek atau Group di luar pusatnya. Ukuran dan tinggi berubah proporsional; Snap memakai langkah faktor 0,05. Untuk mengubah isi Component, buka Edit isi terlebih dahulu. |
+| Penghapus | Pilih Penghapus (E), lalu klik objek atau Group. Gunakan Ctrl+Z untuk mengurungkan. |
+| Ukur | Pilih Ukur (T), tarik antara dua titik pada elevasi yang sama. Jarak tampil di kanvas dan bilah status dalam meter. Pengukuran ini bersifat sementara. |
 | Melihat model | Perspektif aktif saat proyek dibuka. Menu kamera juga menyediakan Aksonometri, Denah, Tampak depan, dan Tampak kanan. Gulir untuk zoom. Tahan tombol tengah untuk orbit. Shift + tombol tengah atau tombol kanan menggeser kamera. F memasukkan seluruh model ke layar. |
 | Group | Shift + klik objek lepas di kanvas atau daftar, lalu pilih Group. Pindahkan atau duplikat Group sebagai satu unit. Pilih Edit isi untuk mengubah anggotanya, dan Urai untuk melepas grup. |
 | Component | Shift + klik objek lepas, lalu pilih Component. Duplikat membuat instans tertaut yang dapat dipindah secara independen. Perubahan lewat Edit isi diterapkan pada semua instans. Urai melepaskan satu instans dari tautannya. Group dan Component bertingkat belum tersedia. |
