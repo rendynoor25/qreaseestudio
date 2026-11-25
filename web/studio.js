@@ -146,6 +146,7 @@ function connection(online, message) {
 }
 
 async function post(url, data) {
+  if (window.qreaseeDemoPost) return window.qreaseeDemoPost(url, data);
   const response = await fetch(url, {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify(data), signal: AbortSignal.timeout(5000)

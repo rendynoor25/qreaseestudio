@@ -54,6 +54,10 @@ docker build -t qreasee-studio .
 docker run --name qreasee-studio -p 127.0.0.1:8941:8941 -v qreasee-data:/data qreasee-studio
 ```
 
+## Demo statis di Vercel
+
+Jalankan `node scripts/build-demo.cjs` untuk menghasilkan folder `dist` berisi lima aset statis. Folder ini dapat di-deploy sebagai situs statis Vercel menggunakan konfigurasi `vercel.json`. Demo memakai proyek contoh dan menyimpan perubahan dalam `localStorage` browser pengunjung; tautan ruang tidak dapat dipakai untuk berbagi data antar-browser. Label `DEMO LOKAL` menandai batas ini. Untuk kolaborasi online sungguhan, jalankan server Rust dengan penyimpanan bersama di layanan yang mendukung proses persisten atau migrasikan API dan data ke arsitektur serverless yang sesuai.
+
 Tautan ruang memberikan izin edit kepada siapa pun yang memegangnya. Versi ini belum memiliki akun, peran pengguna, riwayat revisi yang bisa dipulihkan, atau pengujian beban produksi. Untuk ruang privat, batasi akses di depan server dan gunakan tautan langsung hanya untuk peserta yang dipercaya. Simpan cadangan direktori data jika model diperlukan di kemudian hari.
 
 Revisi dan posisi kursor diperiksa setiap 350 ms selama tab aktif. Perubahan geometri dibagikan setelah drag dilepas atau setelah nilai diterapkan. Edit pada objek yang berbeda bisa digabung, sedangkan edit dari versi lama pada objek atau lembar yang sama ditolak dan memuat keadaan terbaru. Undo/redo berlaku pada operasi sesi sendiri dan tunduk pada pemeriksaan konflik yang sama.

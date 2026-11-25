@@ -11,6 +11,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-vis
 [data-icon]{display:inline-grid;place-items:center;flex:none}
 [data-icon] svg{width:18px;height:18px;display:block}
 .app-header{background:var(--panel);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:21px;padding:0 19px;z-index:3}
+#demo-badge{font-size:10px;font-weight:800;letter-spacing:.08em;color:#18120c;background:var(--brand);border-radius:4px;padding:4px 6px;white-space:nowrap}
 .identity,.project,.collaboration,.modes,.action-group{display:flex;align-items:center;gap:10px;min-width:0}
 .logo{width:34px;height:34px;border-radius:9px;background:var(--brand);color:#1c140d}
 .logo svg{width:22px;height:22px}

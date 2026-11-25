@@ -1,0 +1,6 @@
+.git
+target
+data
+dist
+_chrome_video_*
+_video_*
