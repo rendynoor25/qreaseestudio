@@ -1260,7 +1260,7 @@ $('#snap-toggle').onclick=()=>setSnapping(!state.snapping);
 canvas.addEventListener('contextmenu',event=>event.preventDefault());
 canvas.addEventListener('wheel',event=>{
   event.preventDefault();
-  zoom(Math.exp(clamp(event.deltaY,-400,400)*.0015),...pointer(event));
+  zoom(Math.exp(-clamp(event.deltaY,-400,400)*.0015),...pointer(event));
 },{passive:false});
 canvas.addEventListener('pointerdown',event=>{
   if (state.drag || event.button > 2) return;
