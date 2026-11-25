@@ -74,7 +74,7 @@ const state = {
 };
 const canvas = $('#viewport');
 const ctx = canvas.getContext('2d');
-const camera = { yaw: .62, pitch: .48, scale: 40, base: 40, x: 0, y: 0, center:[0,0,0], distance:22, perspective:true };
+const camera = { yaw: .62, pitch: .48, axes:null, scale: 40, base: 40, x: 0, y: 0, center:[0,0,0], distance:22, perspective:true };
 const views = { perspective:[.62,.48], iso:[.62,.54], plan:[0,Math.PI/2], front:[0,0], right:[Math.PI/2,0] };
 const clamp = (value,min,max) => Math.max(min,Math.min(max,value));
 const round = value => Math.round(value * 1000) / 1000;
@@ -631,6 +631,23 @@ function basis(yaw, pitch) {
   return ([x,y,z]) => [cy*x+sy*y,sy*sp*x-cy*sp*y-cp*z,sy*cp*x-cy*cp*y+sp*z];
 }
 
+function cameraAxes() {
+  if (camera.axes) return camera.axes;
+  const project=basis(camera.yaw,camera.pitch);
+  const columns=[[1,0,0],[0,1,0],[0,0,1]].map(axis=>project(axis));
+  camera.axes=[0,1,2].map(row=>columns.map(column=>column[row]));
+  return camera.axes;
+}
+
+function orbitAxes(source, horizontal, vertical) {
+  const [right,down,depth]=source;
+  const ch=Math.cos(horizontal),sh=Math.sin(horizontal);
+  const turn=([x,y,z])=>[ch*x-sh*y,sh*x+ch*y,z];
+  const cv=Math.cos(vertical),sv=Math.sin(vertical);
+  return [turn(right),turn(down.map((value,i)=>value*cv+depth[i]*sv)),
+    turn(depth.map((value,i)=>value*cv-down[i]*sv))];
+}
+
 function bounds(points) {
   const min = [Infinity,Infinity,Infinity], max = [-Infinity,-Infinity,-Infinity];
   for (const point of points) {
@@ -662,6 +679,7 @@ function fit() {
 
 function cameraView(value) {
   [camera.yaw,camera.pitch] = views[value];
+  camera.axes=null;
   camera.perspective=value==='perspective';
   state.inference=null;
   $('#camera').value = value;
@@ -683,7 +701,8 @@ $('#zoom-in').onclick = () => zoom(1.2);
 $('#zoom-out').onclick = () => zoom(1/1.2);
 
 function projectPoint(point) {
-  const [u,v,d] = basis(camera.yaw,camera.pitch)(point.map((value,i)=>value-camera.center[i]));
+  const relative=point.map((value,i)=>value-camera.center[i]);
+  const [u,v,d]=cameraAxes().map(axis=>axis.reduce((sum,value,i)=>sum+value*relative[i],0));
   const w=camera.perspective ? 1-d/camera.distance : 1;
   return w>.025 ? [u/w,v/w,d/w,w] : [NaN,NaN,d,w];
 }
@@ -695,23 +714,20 @@ function stagePoint(point) {
 }
 
 function ground([x,y], z=0) {
-  const sp=Math.sin(camera.pitch), cp=Math.cos(camera.pitch);
-  const sy=Math.sin(camera.yaw), cy=Math.cos(camera.yaw);
+  const [rightAxis,downAxis,depthAxis]=cameraAxes();
   const u=(x-canvas.clientWidth/2-camera.x)/camera.scale;
   const v=(y-canvas.clientHeight/2-camera.y)/camera.scale;
-  let right=u, vertical=v, depth;
+  const vertical=u*rightAxis[2]+v*downAxis[2];
+  let depth, factor=1;
   if (camera.perspective) {
-    const t=(camera.center[2]+camera.distance*sp-z)/(v*cp+camera.distance*sp);
-    if (!Number.isFinite(t) || t<=.025) return null;
-    right*=t;
-    vertical*=t;
-    depth=camera.distance*(1-t);
+    depth=(z-camera.center[2]-vertical)/(depthAxis[2]-vertical/camera.distance);
+    factor=1-depth/camera.distance;
+    if (!Number.isFinite(factor) || factor<=.025) return null;
   } else {
-    if (Math.abs(sp)<.03) return null;
-    depth=(z-camera.center[2]+v*cp)/sp;
+    if (Math.abs(depthAxis[2])<.03) return null;
+    depth=(z-camera.center[2]-vertical)/depthAxis[2];
   }
-  const point=[camera.center[0]+cy*right+sy*sp*vertical+sy*cp*depth,
-    camera.center[1]+sy*right-cy*sp*vertical-cy*cp*depth];
+  const point=[0,1].map(i=>camera.center[i]+factor*(u*rightAxis[i]+v*downAxis[i])+depth*depthAxis[i]);
   return point.every(value=>Math.abs(value)<=20000) ? point : null;
 }
 
@@ -873,7 +889,8 @@ function svg(name, attributes={}, content) {
 function drawAxes() {
   const holder = $('#orientation');
   const axes = svg('svg',{viewBox:'0 0 83 76','aria-hidden':true});
-  const project = basis(camera.yaw,camera.pitch);
+  const orientation=cameraAxes();
+  const project=point=>orientation.map(axis=>axis.reduce((sum,value,i)=>sum+value*point[i],0));
   axes.append(svg('circle',{cx:42,cy:37,r:30,fill:'#f9fbfc',stroke:'#b9c2ca'}));
   [[1,0,0,'X','#ae554d'],[0,1,0,'Y','#2c725a'],[0,0,1,'Z','#395f9a']].forEach(([x,y,z,label,color]) => {
     const [dx,dy] = project([x,y,z]);
@@ -1114,7 +1131,7 @@ canvas.addEventListener('pointerdown',event=>{
   const start=pointer(event);
   const tool=event.button === 1 ? (event.shiftKey?'pan':'orbit') : event.button === 2 ? 'pan' : state.tool;
   if (tool === 'orbit' || tool === 'pan') {
-    state.drag={tool,start,camera:{...camera}};
+    state.drag={tool,start,camera:{...camera},axes:cameraAxes().map(axis=>[...axis])};
   } else {
     if (!state.doc || state.busy) return;
     const face=pickFace(start,tool!=='pull');
@@ -1161,7 +1178,7 @@ canvas.addEventListener('pointerdown',event=>{
         status(tool==='pull'?'Pilih permukaan horizontal atas.':'Pilih objek yang akan dipindah.');
         return;
       }
-      if (tool==='pull' && (Math.abs(Math.cos(camera.pitch))<.03 || targetId(object)!==object.id)) {
+      if (tool==='pull' && targetId(object)!==object.id) {
         status('Gunakan tampilan 3D dan buka Edit isi untuk mengubah permukaan Group atau Component.');
         return;
       }
@@ -1210,8 +1227,7 @@ canvas.addEventListener('pointermove',event=>{
   state.inference=null;
   const dx=point[0]-drag.start[0], dy=point[1]-drag.start[1];
   if (drag.tool==='orbit') {
-    camera.yaw=drag.camera.yaw-dx*.009;
-    camera.pitch=clamp(drag.camera.pitch-dy*.008,-Math.PI/2+.02,Math.PI/2-.02);
+    camera.axes=orbitAxes(drag.axes,-dx*.009,-dy*.008);
     if (!camera.perspective) $('#camera').value='iso';
   } else if (drag.tool==='pan') {
     camera.x=drag.camera.x+dx;
