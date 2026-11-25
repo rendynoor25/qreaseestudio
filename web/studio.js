@@ -227,7 +227,7 @@ function accept(data) {
   const others=peers.filter(peer=>peer.id!==state.client).sort((a,b)=>a.id.localeCompare(b.id));
   const cursorChanged=JSON.stringify(state.peers)!==JSON.stringify(others);
   state.peers=others;
-  connection(true, peers.length + ' online');
+  connection(true, window.qreaseeDemoPost ? 'Demo lokal' : peers.length + ' online');
   if (cursorChanged) {
     if (state.layout) drawLayoutCursors();
     else redraw();

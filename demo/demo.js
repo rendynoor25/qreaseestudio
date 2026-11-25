@@ -2,12 +2,7 @@
 
 // Static Vercel preview: each browser stores its own editable copy of a room.
 document.querySelector('#demo-badge').hidden = false;
-document.querySelector('#share').addEventListener('click', () => {
-  queueMicrotask(() => {
-    document.querySelector('#share-feedback').textContent =
-      'Demo ini menyimpan data hanya di browser ini. Tautan tidak membagikan model ke orang lain.';
-  });
-});
+document.querySelector('#share').hidden = true;
 
 const demoCopy = value => JSON.parse(JSON.stringify(value));
 const demoKey = room => 'qreasee-demo-room:' + room;
