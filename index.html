@@ -13,15 +13,25 @@
   <script src="./studio.js" defer></script>
   <link rel="stylesheet" href="./auth.css">
 </head>
-<body>
-  <div id="auth-gate" role="dialog" aria-modal="true" aria-labelledby="auth-title">
-    <div class="auth-card">
-      <h1 id="auth-title">Masuk ke Qreasee</h1>
-      <p>Gunakan akun Google untuk membuka dan mengedit proyek bersama.</p>
-      <button id="google-login" disabled>Masuk dengan Google</button>
-      <p id="auth-message" role="status">Memeriksa sesi…</p>
+<body class="landing">
+  <section id="project-home" class="project-home" aria-labelledby="home-title">
+    <header class="home-header">
+      <div class="home-brand" aria-label="Qreasee"><img class="dark-logo" src="./qreasee-logo.png" alt="Qreasee"><img class="light-logo" src="./qreasee-logo-black.png" alt="" aria-hidden="true"></div>
+      <span class="home-header-label">Ruang kerja desain</span>
+      <button id="home-theme" class="home-theme" type="button" aria-label="Ganti tema">◐ <span>Tampilan</span></button>
+    </header>
+    <div class="home-content">
+      <div class="home-intro"><p class="home-eyebrow">SELAMAT DATANG DI QREASEE</p><h1 id="home-title">Ruang untuk ide<br><em>menjadi nyata.</em></h1><p>Mulai model baru atau lanjutkan proyek yang sudah Anda kerjakan. Semua alat gambar dan kolaborasi ada di satu ruang kerja.</p></div>
+      <div class="home-hero-actions">
+        <button id="home-new" class="home-new" type="button"><span class="home-action-icon">＋</span><span><strong>Proyek baru</strong><small>Mulai dari kanvas kosong</small></span></button>
+        <button id="home-example" class="home-example" type="button"><span class="home-action-icon">▧</span><span><strong>Buka contoh</strong><small>Jelajahi model awal Qreasee</small></span></button>
+      </div>
+      <p id="home-message" class="home-message" role="status"></p>
+      <div class="home-section-head"><div><p class="home-eyebrow">PROYEK ANDA</p><h2>Terakhir dibuka</h2></div><span id="home-storage-note">Tersimpan di browser ini</span></div>
+      <div id="home-projects" class="home-projects"></div>
     </div>
-  </div>
+    <footer class="home-footer"><span>Qreasee · Model bersama, lebih mudah.</span><span>Model 3D &amp; gambar teknik</span></footer>
+  </section>
   <header class="app-header">
     <div class="identity" aria-label="Qreasee">
       <img class="brand-logo dark-logo" src="./qreasee-logo.png" alt="Qreasee">
@@ -33,6 +43,7 @@
       <details id="file-menu">
         <summary title="Menu proyek" aria-label="Menu proyek" data-icon="chevron"></summary>
         <div class="dropdown">
+          <button id="all-projects">Semua proyek</button>
           <button id="new-project">Proyek kosong</button>
           <button id="demo-project">Buka contoh baru</button>
           <button id="export-obj">Unduh model OBJ</button>
