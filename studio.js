@@ -54,7 +54,7 @@ const tools = {
   select: ['Pilih', 'V', 'Tarik kiri ke kanan untuk memuat seluruh objek; kanan ke kiri untuk yang tersentuh. Klik tiga kali untuk objek terhubung'],
   line: ['Garis', 'L', 'Klik awal, ketik panjang, lalu klik arah titik akhir'],
   arc: ['Busur', 'A', 'Klik pusat, ketik radius atau radius, sudut, lalu klik arah; tanpa angka gunakan tiga klik'],
-  offset: ['Offset', 'I', 'Tarik dari bidang persegi atau lingkaran untuk membuat kontur sejajar'],
+  offset: ['Offset', 'F', 'Klik perimeter bidang, lalu tentukan jarak; ketik jarak setelah klik pertama'],
   rectangle: ['Persegi panjang', 'R', 'Klik awal, ketik X × Y, lalu klik arah pada bidang horizontal atau vertikal'],
   circle: ['Lingkaran', 'C', 'Klik pusat, ketik radius, lalu klik arah'],
   pull: ['Push/Pull', 'P', 'Klik bidang, ketik jarak, lalu klik arah atas atau bawah'],
@@ -82,7 +82,7 @@ const state = {
   doc: null, meshes: [], plans: [], selected: new Set(), inside: null, tool: 'select', layout: false, busy: false,
   snapping: true, inference: null,
   undo: [], redo: [], drag: null, arcPending:null, linePending:null, linePress:null, drawPending:null,
-  movePending:null, rotatePending:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null
+  movePending:null, rotatePending:null, offsetPending:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null
 };
 const canvas = $('#viewport');
 const ctx = canvas.getContext('2d');
@@ -168,6 +168,7 @@ function setTool(tool) {
     state.drawPending=null;
     state.movePending=null;
     state.rotatePending=null;
+    state.offsetPending=null;
     state.hoverKey=null;
     if (state.cursor) delete state.cursor.line;
     $('#line-length').value='';
@@ -178,10 +179,10 @@ function setTool(tool) {
     state.hoverKey=null;
     state.inference=null;
   }
-  const measured=['line','rectangle','circle','arc','pull','rotate'].includes(tool);
+  const measured=['line','rectangle','circle','arc','pull','rotate','offset'].includes(tool);
   $('#line-length-control').hidden=!measured;
-  $('#measure-label').textContent={line:'Panjang',rectangle:'X × Y',circle:'Radius',arc:'Radius, sudut',pull:'Jarak',rotate:'Sudut'}[tool]||'Ukuran';
-  $('#line-length').placeholder={rectangle:'2 x 3',arc:'2, 90',rotate:'30'}[tool]||'0';
+  $('#measure-label').textContent={line:'Panjang',rectangle:'X × Y',circle:'Radius',arc:'Radius, sudut',pull:'Jarak',rotate:'Sudut',offset:'Jarak'}[tool]||'Ukuran';
+  $('#line-length').placeholder={rectangle:'2 x 3',arc:'2, 90',rotate:'30',offset:'1'}[tool]||'0';
   $('#line-length').inputMode=tool==='rectangle'||tool==='arc'?'text':'decimal';
   $('#line-length').min=tool==='rotate'?'-360':'0.001';
   $('#line-unit').textContent=tool==='rotate'?'°':displayUnit;
@@ -402,6 +403,13 @@ $('#line-length').addEventListener('input',()=>{
     redraw();
     return;
   }
+  if (state.offsetPending) {
+    const size=measurement('offset');
+    if (size && !size.invalid)
+      updateOffsetPreview(state.offsetPending,(state.offsetPending.sign||-1)*size.primary);
+    redraw();
+    return;
+  }
   if (state.linePending?.raw) {
     const pending=state.linePending,size=measurement('line');
     pending.b=size && !size.invalid
@@ -427,12 +435,14 @@ $('#line-length').addEventListener('keydown',event=>{
   if (event.key==='Enter') {
     event.preventDefault();
     if (state.rotatePending) applyRotateValue();
+    else if (state.offsetPending) applyOffsetValue();
     else applyLineLength();
   } else if (event.key==='Escape') {
     event.preventDefault();
     $('#line-length').value='';
     state.drawPending=null;
     state.rotatePending=null;
+    state.offsetPending=null;
     if (state.linePending) finishLine();
     setTool('select');
     canvas.focus({preventScroll:true});
@@ -477,7 +487,8 @@ function mode(layout) {
   state.drawPending = null;
   state.movePending = null;
   state.rotatePending = null;
-  $('#line-length-control').hidden=layout || !['line','rectangle','circle','arc','pull','rotate'].includes(state.tool);
+  state.offsetPending = null;
+  $('#line-length-control').hidden=layout || !['line','rectangle','circle','arc','pull','rotate','offset'].includes(state.tool);
   $('#line-length').value='';
   for (const id of ['stage','tree','inspector']) {
     $('#model-' + id).hidden = layout;
@@ -537,7 +548,8 @@ async function openRoom(createBlank) {
   state.drawPending = null;
   state.movePending = null;
   state.rotatePending = null;
-  $('#line-length-control').hidden=state.layout || !['line','rectangle','circle','arc','pull','rotate'].includes(state.tool);
+  state.offsetPending = null;
+  $('#line-length-control').hidden=state.layout || !['line','rectangle','circle','arc','pull','rotate','offset'].includes(state.tool);
   $('#line-length').value='';
   state.undo = [];
   state.redo = [];
@@ -862,6 +874,7 @@ function renderTree() {
 function select(id, additive=false) {
   if (state.movePending) {state.movePending=null;state.inference=null;}
   if (state.rotatePending) {state.rotatePending=null;state.inference=null;}
+  if (state.offsetPending) {state.offsetPending=null;state.inference=null;}
   if (!additive && state.selected.size===1 && state.selected.has(id)) return;
   if (!additive) {
     state.selected.clear();
@@ -1041,6 +1054,106 @@ function applyRotateValue() {
   updateRotatePreview(pending,size.primary);
   $('#line-length').value=String(size.primary);
   commitRotate(pending);
+}
+
+/** @param {QreaseeObject|null|undefined} object @returns {boolean} */
+function validOffsetHost(object) {
+  return Boolean(object) && object.height===0 && !object.wall_axis && !object.plane_u &&
+    !object.solid_id && targetId(object)===object.id && !state.inside &&
+    ['rectangle','circle','polygon'].includes(object.shape) &&
+    (object.shape!=='polygon' || Boolean(object.profile));
+}
+
+/** @param {QreaseePoint2} point @returns {QreaseeObject|null} */
+function offsetHostAt(point) {
+  const direct=pickFace(point,false)?.object;
+  if (validOffsetHost(direct)) return direct;
+  let best=null;
+  for (const face of state.hits) {
+    if (face.world.length<3 || !validOffsetHost(face.object)) continue;
+    const distance=pointToPolygonEdge(point,face.points);
+    if (distance<=snapRadius && (!best || distance<best.distance))
+      best={object:face.object,distance};
+  }
+  return best?.object??null;
+}
+
+/** @param {QreaseePoint[]} outline @param {QreaseePoint} origin @returns {{normal: QreaseePoint2, point: QreaseePoint2}|null} */
+function offsetNormal(outline,origin) {
+  const area=outline.reduce((sum,point,index)=>{
+    const next=outline[(index+1)%outline.length];
+    return sum+point[0]*next[1]-next[0]*point[1];
+  },0);
+  const side=area>=0?1:-1;
+  let best=null;
+  for (let i=0;i<outline.length;i++) {
+    const a=outline[i],b=outline[(i+1)%outline.length];
+    const dx=b[0]-a[0],dy=b[1]-a[1],length=Math.hypot(dx,dy);
+    if (length<1e-9) continue;
+    const fraction=clamp(((origin[0]-a[0])*dx+(origin[1]-a[1])*dy)/(dx*dx+dy*dy),0,1);
+    const distance=Math.hypot(origin[0]-a[0]-fraction*dx,origin[1]-a[1]-fraction*dy);
+    if (!best || distance<best.distance)
+      best={distance,normal:[side*dy/length,-side*dx/length],
+        point:[/** @type {number} */ (a[0]+fraction*dx),/** @type {number} */ (a[1]+fraction*dy)]};
+  }
+  return best?{normal:best.normal,point:best.point}:null;
+}
+
+function updateOffsetPreview(pending,raw) {
+  const sign=raw>.000001?1:raw<-.000001?-1:(pending.sign||-1);
+  const distance=state.snapping?snap(raw,.05):round(raw);
+  pending.sign=Math.sign(distance)||sign;
+  pending.distance=distance;
+  pending.contour=Math.abs(distance)>=.001?offsetOutline(pending.outline,distance):null;
+  if (document.activeElement!==$('#line-length'))
+    $('#line-length').value=Math.abs(distance)>=.001?String(displayLength(Math.abs(distance))):'';
+}
+
+function offsetFace(host,contour,distance) {
+  let geometry=null,shape=host.shape;
+  if (host.shape==='rectangle') {
+    const width=host.width+2*distance, depth=host.depth+2*distance;
+    if (width<=.001 || depth<=.001) return null;
+    geometry={x:host.x,y:host.y,z:host.z,width,depth,height:0,rotation:host.rotation};
+  } else if (host.shape==='circle') {
+    const width=host.width+2*distance, depth=host.depth+2*distance;
+    if (width<=.001 || depth<=.001) return null;
+    geometry={x:host.x,y:host.y,z:host.z,width,depth,height:0,rotation:host.rotation};
+  } else {
+    const face=QreaseeLine.polygonFromLoop(contour);
+    if (!face) return null;
+    shape='polygon';
+    geometry={...face,height:0,rotation:0,profile:{...face.profile,inferred:false}};
+  }
+  return {...host,id:identity(),name:('Offset '+host.name).slice(0,64),shape,...geometry,
+    solid_id:null,surface_role:null,opening_id:null,opening_origin:null,
+    wall_axis:null,...(shape==='polygon'?{}:{profile:null})};
+}
+
+function commitOffset(pending) {
+  if (!pending || !pending.contour || Math.abs(pending.distance)<.001) {
+    showStatus('Tentukan jarak offset ke dalam atau ke luar.');
+    return;
+  }
+  const object=offsetFace(pending.host,pending.contour,pending.distance);
+  if (!object) {showStatus('Jarak offset menghasilkan bidang yang tidak valid.');return;}
+  const distance=pending.distance;
+  state.offsetPending=null;
+  state.inference=null;
+  $('#line-length').value='';
+  addObject(object,false).then(created=>{
+    if (created) showStatus('Offset '+lengthLabel(Math.abs(distance))+' dibuat.');
+  });
+  redraw();
+}
+
+function applyOffsetValue() {
+  const pending=state.offsetPending;
+  if (!pending) {showStatus('Klik perimeter bidang terlebih dahulu.');return;}
+  const size=measurement('offset');
+  if (!size || size.invalid) {measurementError();return;}
+  updateOffsetPreview(pending,(pending.sign||-1)*size.primary);
+  commitOffset(pending);
 }
 
 $('#search').onfocus=()=>panel('objects',true);
@@ -2031,9 +2144,23 @@ function draw() {
       }
     }
   }
-  if (drag?.tool==='offset' && drag.contour?.length) {
-    polygon(drag.contour.map(stagePoint));
+  const offsetContour=state.drag?.tool==='offset'?state.drag.contour:state.offsetPending?.contour;
+  if (offsetContour?.length) {
+    polygon(offsetContour.map(stagePoint));
     ctx.strokeStyle='#bf671c';ctx.lineWidth=2;ctx.stroke();
+  }
+  if (state.offsetPending?.contour) {
+    const pending=state.offsetPending;
+    const a=stagePoint(pending.origin);
+    const b=stagePoint([pending.origin[0]+pending.normal[0]*pending.distance,
+      pending.origin[1]+pending.normal[1]*pending.distance,pending.z]);
+    if (Number.isFinite(a[0]) && Number.isFinite(b[0])) {
+      strokeLine(a,b,'#bf671c',1.2);
+      for (const [x,y] of [a,b]) {
+        ctx.beginPath();ctx.arc(x,y,3.5,0,Math.PI*2);
+        ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#bf671c';ctx.lineWidth=1.5;ctx.stroke();
+      }
+    }
   }
   if (drag?.tool==='move' && drag.updates) {
     const anchor=stagePoint([drag.anchor[0]+drag.delta[0],drag.anchor[1]+drag.delta[1],drag.elevation]);
@@ -2702,25 +2829,34 @@ canvas.addEventListener('pointerdown',event=>{
       redraw();
       return;
     }
-    const object=face?.object;
     if (tool==='offset') {
-      if (!object || state.inside || targetId(object)!==object.id || object.wall_axis ||
-          object.height!==0 || !['rectangle','circle'].includes(object.shape)) {
-        showStatus('Offset tersedia untuk bidang persegi atau lingkaran datar di luar Group.');return;
+      if (state.offsetPending) {
+        const pending=state.offsetPending;
+        const end=ground(start,pending.z);
+        if (end) updateOffsetPreview(pending,
+          (end[0]-pending.origin[0])*pending.normal[0]+(end[1]-pending.origin[1])*pending.normal[1]);
+        commitOffset(pending);
+        return;
       }
-      const origin=ground(start,object.z);
-      if (!origin) {showStatus('Gunakan denah atau tampilan 3D untuk Offset.');return;}
-      const outline=previewMesh(object).vertices.slice(0,object.shape==='circle'?48:4);
-      const area=outline.reduce((sum,p,i)=>{const q=outline[(i+1)%outline.length];return sum+p[0]*q[1]-q[0]*p[1]},0);
-      let nearest=null;
-      outline.forEach((a,i)=>{
-        const b=outline[(i+1)%outline.length],dx=b[0]-a[0],dy=b[1]-a[1];
-        const fraction=clamp(((origin[0]-a[0])*dx+(origin[1]-a[1])*dy)/(dx*dx+dy*dy),0,1);
-        const distance=Math.hypot(origin[0]-a[0]-fraction*dx,origin[1]-a[1]-fraction*dy);
-        if (!nearest || distance<nearest.distance) nearest={distance,normal:[(area>=0?1:-1)*dy/Math.hypot(dx,dy),-(area>=0?1:-1)*dx/Math.hypot(dx,dy)]};
-      });
-      state.drag={tool,start,object,origin,outline,normal:nearest.normal,elevation:object.z};
-    } else if (tool==='scale') {
+      const host=offsetHostAt(start);
+      if (!host) {showStatus('Klik perimeter bidang datar yang akan di-offset.');return;}
+      const outline=previewMesh({...host,height:0}).vertices;
+      const origin=ground(start,host.z);
+      if (!origin || outline.length<3) {showStatus('Gunakan denah atau tampilan 3D untuk Offset.');return;}
+      const point=/** @type {QreaseePoint} */ ([origin[0],origin[1],host.z]);
+      const edge=offsetNormal(outline,point);
+      if (!edge) {showStatus('Perimeter bidang tidak valid untuk Offset.');return;}
+      const startPoint=/** @type {QreaseePoint} */ ([edge.point[0],edge.point[1],host.z]);
+      state.offsetPending={host,outline,origin:startPoint,z:host.z,normal:edge.normal,
+        distance:0,sign:-1,contour:null};
+      state.inference=null;
+      $('#line-length').value='';
+      showStatus('Gerakkan ke dalam atau ke luar bidang; klik kedua atau ketik jarak lalu Enter.');
+      redraw();
+      return;
+    }
+    const object=face?.object;
+    if (tool==='scale') {
       const id=targetId(object);
       const group=members(id);
       const sources=group.length?group:object?[object]:[];
@@ -2818,6 +2954,19 @@ canvas.addEventListener('pointermove',event=>{
         showStatus('Sudut '+angle.toFixed(1)+'°');
       } else if (!destination) pending.updates=null;
       state.inference=destination?.label?destination:null;
+      redraw();
+      return;
+    }
+    if (state.offsetPending) {
+      const pending=state.offsetPending;
+      const end=ground(point,pending.z);
+      if (end && document.activeElement!==$('#line-length')) {
+        const raw=(end[0]-pending.origin[0])*pending.normal[0]+(end[1]-pending.origin[1])*pending.normal[1];
+        updateOffsetPreview(pending,raw);
+        showStatus('Offset '+lengthLabel(Math.abs(pending.distance))+
+          (pending.distance<0?' ke dalam':' ke luar'));
+      }
+      state.inference=null;
       redraw();
       return;
     }
@@ -3056,6 +3205,7 @@ window.addEventListener('keydown',event=>{
     if (state.drawPending) {state.drawPending=null;state.inference=null;setTool('select');redraw();return;}
     if (state.movePending) {state.movePending=null;state.inference=null;setTool('select');redraw();return;}
     if (state.rotatePending) {state.rotatePending=null;state.inference=null;setTool('select');redraw();return;}
+    if (state.offsetPending) {state.offsetPending=null;state.inference=null;setTool('select');redraw();return;}
     if (state.linePending) {finishLine();setTool('select');return;}
     if (typing) return;
     if (state.inside) {exitContainer();return;}
@@ -3074,7 +3224,8 @@ window.addEventListener('keydown',event=>{
   }
   if (buttonFocus) return;
   if ((['line','rectangle','circle','arc','pull'].includes(state.tool) ||
-      (state.tool==='rotate'&&state.rotatePending)) && !state.layout &&
+      (state.tool==='rotate'&&state.rotatePending) ||
+      (state.tool==='offset'&&state.offsetPending)) && !state.layout &&
       !event.ctrlKey && !event.metaKey && !event.altKey) {
     const pattern=state.tool==='rotate'?/^[0-9.\-]$/:/^[0-9.,;xX.]$/;
     if (pattern.test(event.key)) {
@@ -3095,7 +3246,7 @@ window.addEventListener('keydown',event=>{
     state.drag=null;state.inference=null;
     setTool('select');redraw();return;
   }
-  if (key==='F') { fit();return; }
+  if (key==='F' && event.shiftKey) { event.preventDefault(); fit();return; }
   if (key==='G' || key==='Q') { event.preventDefault();createContainer(key==='Q');return; }
   const tool=Object.entries(tools).find(([,value])=>value[1]===key);
   if (tool) setTool(tool[0]);
