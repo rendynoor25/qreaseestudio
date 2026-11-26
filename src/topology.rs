@@ -319,6 +319,7 @@ fn new_face(region: &Loop) -> Option<Object> {
         height: 0.0,
         rotation: 0.0,
         color: "#dfcbb8".into(),
+        material: None,
         container: None,
         profile: Some(Box::new(Profile {
             points: profile,
@@ -456,6 +457,7 @@ mod tests {
             height: 0.0,
             rotation: 0.0,
             color: "#000000".into(),
+            material: None,
             container: None,
             profile: None,
             wall_axis: None,

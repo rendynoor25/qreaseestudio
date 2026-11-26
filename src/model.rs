@@ -57,6 +57,8 @@ pub struct Object {
     pub rotation: f64,
     pub color: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<Box<Membership>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<Box<Profile>>,
@@ -101,6 +103,9 @@ impl Object {
             && self.color.len() == 7
             && self.color.starts_with('#')
             && self.color.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit)
+            && self.material.as_ref().is_none_or(|material| matches!(material.as_str(),
+                "brick" | "hebel" | "timber" | "zinc" | "clay_tile" | "concrete_tile" |
+                "glass" | "grass" | "sand" | "asphalt" | "metal" | "paint"))
             && [self.x, self.y, self.z, self.rotation]
                 .into_iter()
                 .all(bounded)
@@ -423,6 +428,18 @@ pub struct SheetText {
     pub y: f64,
     pub text: String,
     pub size: f64,
+    #[serde(default, rename = "viewId", skip_serializing_if = "Option::is_none")]
+    pub view_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SheetGridLine {
+    pub id: String,
+    #[serde(rename = "viewId")]
+    pub view_id: String,
+    pub a: [f64; 2],
+    pub b: [f64; 2],
+    pub name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -432,6 +449,10 @@ pub struct SheetDimension {
     pub view_id: String,
     pub a: [f64; 2],
     pub b: [f64; 2],
+    #[serde(default, rename = "gridA", skip_serializing_if = "Option::is_none")]
+    pub grid_a: Option<String>,
+    #[serde(default, rename = "gridB", skip_serializing_if = "Option::is_none")]
+    pub grid_b: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -439,11 +460,14 @@ pub struct SheetLayout {
     pub views: Vec<SheetView>,
     pub texts: Vec<SheetText>,
     pub dimensions: Vec<SheetDimension>,
+    #[serde(default, rename = "gridLines", skip_serializing_if = "Vec::is_empty")]
+    pub grid_lines: Vec<SheetGridLine>,
 }
 
 impl SheetLayout {
     fn valid(&self) -> bool {
         self.views.len() <= 24 && self.texts.len() <= 100 && self.dimensions.len() <= 100
+            && self.grid_lines.len() <= 100
             && self.views.iter().all(|view| {
                 !view.id.is_empty() && ["plan", "front", "right", "iso"].contains(&view.mode.as_str())
                     && !view.title.trim().is_empty() && view.title.chars().count() <= 80
@@ -456,10 +480,24 @@ impl SheetLayout {
                     && item.x.is_finite() && item.y.is_finite() && item.size.is_finite()
                     && item.x >= 9.0 && item.x <= 411.0 && item.y >= 9.0 && item.y <= 288.0
                     && item.size >= 2.0 && item.size <= 15.0
+                    && item.view_id.as_ref().is_none_or(|id| self.views.iter().any(|view| &view.id == id))
+            })
+            && self.grid_lines.iter().all(|item| {
+                !item.id.is_empty() && !item.name.trim().is_empty() && item.name.chars().count() <= 12
+                    && self.views.iter().any(|view| view.id == item.view_id && view.mode != "iso"
+                        && item.a[0] >= 0.0 && item.a[0] <= view.w && item.b[0] >= 0.0 && item.b[0] <= view.w
+                        && item.a[1] >= 0.0 && item.a[1] <= view.h && item.b[1] >= 0.0 && item.b[1] <= view.h)
+                    && item.a.into_iter().chain(item.b).all(f64::is_finite)
+                    && (item.a[0] - item.b[0]).hypot(item.a[1] - item.b[1]) >= 2.0
             })
             && self.dimensions.iter().all(|item| {
                 !item.id.is_empty() && self.views.iter().any(|view| view.id == item.view_id && view.mode != "iso")
                     && item.a.into_iter().chain(item.b).all(|v| v.is_finite() && v >= 0.0 && v <= 420.0)
+                    && match (&item.grid_a, &item.grid_b) {
+                        (None, None) => true,
+                        (Some(a), Some(b)) => a != b && [a,b].iter().all(|id| self.grid_lines.iter().any(|grid| grid.id == **id && grid.view_id == item.view_id)),
+                        _ => false,
+                    }
             })
     }
 }
@@ -539,6 +577,35 @@ impl Comment {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SectionPlane {
+    pub id: String,
+    pub name: String,
+    pub symbol: String,
+    pub origin: Point,
+    pub normal: Point,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+impl SectionPlane {
+    fn valid(&self) -> bool {
+        let finite = |values: &[f64]| values.iter().all(|value| value.is_finite() && value.abs() <= 10000.0);
+        uuid::Uuid::parse_str(&self.id).is_ok()
+            && !self.name.trim().is_empty()
+            && self.name.chars().count() <= 32
+            && !self.symbol.trim().is_empty()
+            && self.symbol.chars().count() <= 8
+            && finite(&self.origin)
+            && finite(&self.normal)
+            && self.normal.iter().map(|value| value * value).sum::<f64>() > 1e-8
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Share {
     #[serde(default = "default_share_role")]
     pub role: String,
@@ -569,6 +636,8 @@ pub struct Document {
     pub sheet: Sheet,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub comments: Vec<Comment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sections: Vec<SectionPlane>,
     #[serde(default)]
     pub share: Share,
     #[serde(default)]
@@ -599,6 +668,10 @@ pub enum Edit {
     Share {
         before: Share,
         after: Share,
+    },
+    Section {
+        before: Option<SectionPlane>,
+        after: Option<SectionPlane>,
     },
 }
 
@@ -643,6 +716,10 @@ pub fn apply(document: &mut Document, edit: Edit) -> Result<FaceChanges, &'stati
                 return Err("Peran akses tidak valid.");
             }
             document.share = after;
+            FaceChanges::default()
+        }
+        Edit::Section { before, after } => {
+            apply_section(document, before, after)?;
             FaceChanges::default()
         }
     };
@@ -729,6 +806,52 @@ fn comment_parent_valid(document: &Document, comment: &Comment) -> bool {
         .iter()
         .find(|item| item.id == parent)
         .is_some_and(|item| item.target == comment.target && item.parent.is_none())
+}
+
+fn apply_section(
+    document: &mut Document,
+    before: Option<SectionPlane>,
+    after: Option<SectionPlane>,
+) -> Result<(), &'static str> {
+    match (before, after) {
+        (None, Some(section)) => {
+            if !section.valid() {
+                return Err("Bidang potong tidak valid.");
+            }
+            if document.sections.iter().any(|item| item.id == section.id) {
+                return Err("conflict");
+            }
+            if document.sections.len() >= 12 {
+                return Err("Batas 12 bidang potong tercapai.");
+            }
+            document.sections.push(section);
+            Ok(())
+        }
+        (Some(before), None) => {
+            let Some(index) = document.sections.iter().position(|item| item.id == before.id) else {
+                return Err("conflict");
+            };
+            if document.sections[index] != before {
+                return Err("conflict");
+            }
+            document.sections.remove(index);
+            Ok(())
+        }
+        (Some(before), Some(after)) => {
+            if !after.valid() {
+                return Err("Bidang potong tidak valid.");
+            }
+            let Some(index) = document.sections.iter().position(|item| item.id == before.id) else {
+                return Err("conflict");
+            };
+            if document.sections[index] != before || after.id != before.id {
+                return Err("conflict");
+            }
+            document.sections[index] = after;
+            Ok(())
+        }
+        (None, None) => Err("Perintah bidang potong tidak valid."),
+    }
 }
 
 fn apply_objects(
@@ -918,6 +1041,7 @@ pub fn demo() -> Document {
             height,
             rotation: 0.0,
             color: color.into(),
+            material: None,
             container: None,
             profile: None,
             wall_axis: None,
@@ -997,6 +1121,7 @@ pub fn demo() -> Document {
             layout: None,
         },
         comments: Vec::new(),
+        sections: Vec::new(),
         share: Share::default(),
         faces_initialized: true,
     }
@@ -1018,11 +1143,14 @@ mod tests {
             texts: vec![SheetText {
                 id: "text-1".into(), x: 20.0, y: 30.0,
                 text: "Ruang keluarga".into(), size: 4.0,
+                view_id: None,
             }],
             dimensions: vec![SheetDimension {
                 id: "dim-1".into(), view_id: "view-1".into(),
                 a: [10.0, 10.0], b: [50.0, 10.0],
+                grid_a: None, grid_b: None,
             }],
+            grid_lines: Vec::new(),
         });
         assert!(sheet.valid());
         let restored: Sheet = serde_json::from_value(serde_json::to_value(&sheet).unwrap()).unwrap();
@@ -1289,6 +1417,64 @@ mod tests {
             ),
             Err("Komentar atau objek target tidak valid.")
         );
+    }
+
+    #[test]
+    fn material_presets_are_validated() {
+        let mut object = demo().objects.remove(0);
+        object.material = Some("brick".into());
+        assert!(object.valid());
+        object.material = Some("bamboo".into());
+        assert!(!object.valid());
+        object.material = None;
+        assert!(object.valid());
+    }
+
+    #[test]
+    fn section_planes_add_flip_and_delete() {
+        let mut doc = demo();
+        let section = SectionPlane {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Section 1".into(),
+            symbol: "1".into(),
+            origin: [1.0, 2.0, 3.0],
+            normal: [0.0, 0.0, 1.0],
+            enabled: true,
+        };
+        apply(
+            &mut doc,
+            Edit::Section {
+                before: None,
+                after: Some(section.clone()),
+            },
+        )
+        .unwrap();
+        assert_eq!(doc.sections.len(), 1);
+        let flipped = SectionPlane {
+            normal: [0.0, 0.0, -1.0],
+            ..section.clone()
+        };
+        apply(
+            &mut doc,
+            Edit::Section {
+                before: Some(section.clone()),
+                after: Some(flipped),
+            },
+        )
+        .unwrap();
+        assert_eq!(doc.sections[0].normal, [0.0, 0.0, -1.0]);
+        apply(
+            &mut doc,
+            Edit::Section {
+                before: Some(SectionPlane {
+                    normal: [0.0, 0.0, -1.0],
+                    ..section
+                }),
+                after: None,
+            },
+        )
+        .unwrap();
+        assert!(doc.sections.is_empty());
     }
 
     #[test]

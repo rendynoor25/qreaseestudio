@@ -5,10 +5,12 @@ type QreaseePoint = [number, number, number];
 type QreaseePoint2 = [number, number];
 type QreaseeView = 'perspective' | 'iso' | 'plan' | 'front' | 'right';
 type QreaseeShape = 'line' | 'rectangle' | 'circle' | 'polygon';
+type QreaseeMaterial = 'brick' | 'hebel' | 'timber' | 'zinc' | 'clay_tile' |
+  'concrete_tile' | 'glass' | 'grass' | 'sand' | 'asphalt' | 'metal' | 'paint';
 type QreaseeTool =
   | 'select' | 'line' | 'arc' | 'offset' | 'rectangle' | 'circle'
   | 'pull' | 'move' | 'rotate' | 'scale' | 'erase' | 'measure'
-  | 'orbit' | 'pan';
+  | 'section' | 'orbit' | 'pan';
 
 interface QreaseeMembership {
   id: string;
@@ -34,6 +36,7 @@ interface QreaseeObject {
   height: number;
   rotation: number;
   color: string;
+  material?: QreaseeMaterial | null;
   container?: QreaseeMembership | null;
   profile?: QreaseeProfile | null;
   wall_axis?: QreaseePoint2 | null;
@@ -58,8 +61,9 @@ interface QreaseeSheet {
   issue_date?: string;
   layout?: {
     views: Array<{id:string; mode:'plan'|'front'|'right'|'iso'; x:number; y:number; w:number; h:number; title:string; grid?:boolean}>;
-    texts: Array<{id:string; x:number; y:number; text:string; size:number}>;
-    dimensions: Array<{id:string; viewId:string; a:QreaseePoint2; b:QreaseePoint2}>;
+    texts: Array<{id:string; x:number; y:number; text:string; size:number; viewId?:string}>;
+    gridLines?: Array<{id:string; viewId:string; a:QreaseePoint2; b:QreaseePoint2; name:string}>;
+    dimensions: Array<{id:string; viewId:string; a:QreaseePoint2; b:QreaseePoint2; gridA?:string; gridB?:string}>;
   };
 }
 
@@ -74,6 +78,15 @@ interface QreaseeComment {
   resolved?: boolean;
 }
 
+interface QreaseeSectionPlane {
+  id: string;
+  name: string;
+  symbol: string;
+  origin: QreaseePoint;
+  normal: QreaseePoint;
+  enabled?: boolean;
+}
+
 interface QreaseeShare {
   role: 'edit' | 'comment' | 'view';
 }
@@ -83,6 +96,7 @@ interface QreaseeDocument {
   objects: QreaseeObject[];
   sheet: QreaseeSheet;
   comments?: QreaseeComment[];
+  sections?: QreaseeSectionPlane[];
   share?: QreaseeShare;
   faces_initialized?: boolean;
 }
@@ -125,7 +139,14 @@ interface QreaseeShareEdit {
   after: QreaseeShare;
 }
 
-type QreaseeEdit = QreaseeObjectEdit | QreaseeBatchEdit | QreaseeSheetEdit | QreaseeCommentEdit | QreaseeShareEdit;
+interface QreaseeSectionEdit {
+  type: 'section';
+  before?: QreaseeSectionPlane | null;
+  after?: QreaseeSectionPlane | null;
+}
+
+type QreaseeEdit = QreaseeObjectEdit | QreaseeBatchEdit | QreaseeSheetEdit |
+  QreaseeCommentEdit | QreaseeShareEdit | QreaseeSectionEdit;
 
 interface QreaseeChangeSet {
   document: QreaseeDocument;
@@ -192,6 +213,7 @@ interface QreaseeHit {
   depth: number;
   smooth: boolean;
   quiet: boolean;
+  section?: boolean;
   key: string;
 }
 
@@ -234,6 +256,7 @@ interface QreaseeState {
   rotatePending: any;
   offsetPending: any;
   measurePending: any;
+  sectionPending: any;
   hits: QreaseeHit[];
   hoverKey: string | null;
   epoch: number;

@@ -31,6 +31,7 @@ window.qreaseeDemoPost = async (url, request) => {
       if (request.blank) {
         document.objects = [];
         document.comments = [];
+        document.sections = [];
         document.share = {role:'edit'};
         document.sheet.title = 'Proyek tanpa judul';
       }
