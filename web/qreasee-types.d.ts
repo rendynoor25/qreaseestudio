@@ -261,6 +261,7 @@ interface QreaseeState {
   movePending: any;
   rotatePending: any;
   offsetPending: any;
+  offsetHover: any;
   measurePending: any;
   sectionPending: any;
   sectionHover: any;
