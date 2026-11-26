@@ -7,7 +7,8 @@
     "build:demo": "node scripts/build-demo.cjs"
   },
   "dependencies": {
-    "@supabase/supabase-js": "2.119.2"
+    "@supabase/supabase-js": "2.119.2",
+    "polygon-clipping": "^0.15.7"
   },
   "devDependencies": {
     "esbuild": "0.28.2",

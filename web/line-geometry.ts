@@ -1,3 +1,5 @@
+import { intersection as intersectPolygons, difference as differencePolygons } from 'polygon-clipping';
+
 export type Point = [number, number, number];
 export type XY = [number, number];
 
@@ -404,6 +406,70 @@ export function polygonFromLoop(loop: readonly Point[]): {
     z:horizontal?loop[0][2]:loop[0][2]+x*basisU![2]+y*basisV![2],width,depth,
     ...(horizontal?{}:{plane_u:basisU!,plane_v:basisV!}),
     profile: { points: ring.map(point => [(point[0] - x) / width, (point[1] - y) / depth]), inferred: true } };
+}
+
+export function splitOverlappingLoops(first: readonly Point[], second: readonly Point[]):
+  { first: Point[][]; second: Point[][]; intersection: Point[][] } | null {
+  if (first.length < 3 || second.length < 3) return null;
+  const horizontal = [...first, ...second].every(point =>
+    Math.abs(point[2] - first[0][2]) < 1e-5);
+  let u: Point, v: Point, origin: Point;
+  if (horizontal) {
+    u = [1,0,0]; v = [0,1,0]; origin = [0,0,first[0][2]];
+  } else {
+    origin = first[0];
+    const direction = first.find(point => Math.hypot(...difference3(point,origin)) > 1e-5);
+    if (!direction) return null;
+    const delta = difference3(direction,origin), length = Math.hypot(...delta);
+    u = delta.map(value => value/length) as Point;
+    const secondPoint = first.find(point => {
+      const offset = difference3(point,origin), along = dot3(offset,u);
+      return Math.hypot(...difference3(offset,u.map(value => value*along) as Point)) > 1e-5;
+    });
+    if (!secondPoint) return null;
+    const offset = difference3(secondPoint,origin), along = dot3(offset,u);
+    const transverse = difference3(offset,u.map(value => value*along) as Point);
+    const span = Math.hypot(...transverse);
+    v = transverse.map(value => value/span) as Point;
+    const normal = cross3(u,v);
+    if ([...first,...second].some(point =>
+      Math.abs(dot3(difference3(point,origin),normal)) > 1e-5)) return null;
+  }
+  const project = (loop: readonly Point[]): XY[] => loop.map(point => {
+    const delta = difference3(point,origin);
+    return [dot3(delta,u),dot3(delta,v)] as XY;
+  });
+  const unproject = (ring: readonly [number,number][]): Point[] => {
+    const cleaned = ring.length > 1 &&
+      Math.abs(ring[0][0]-ring[ring.length-1][0]) < 1e-9 &&
+      Math.abs(ring[0][1]-ring[ring.length-1][1]) < 1e-9
+      ? ring.slice(0,-1) : ring;
+    return cleaned.map(point => /** @type {Point} */ ([
+      origin[0]+point[0]*u[0]+point[1]*v[0],
+      origin[1]+point[0]*u[1]+point[1]*v[1],
+      origin[2]+point[0]*u[2]+point[1]*v[2]
+    ]));
+  };
+  const toLoops = (multi: [number,number][][][]): Point[][] | null => {
+    const loops: Point[][] = [];
+    for (const polygon of multi) {
+      if (polygon.length !== 1) return null;
+      const loop = unproject(polygon[0]);
+      if (loop.length < 3) continue;
+      const area = loop.reduce((sum, point, index) => {
+        const next = loop[(index+1)%loop.length];
+        return sum + point[0]*next[1]-next[0]*point[1];
+      },0);
+      if (Math.abs(area) > 1e-8) loops.push(loop);
+    }
+    return loops;
+  };
+  const ringA = project(first), ringB = project(second);
+  const firstOnly = toLoops(differencePolygons([ringA],[ringB]));
+  const secondOnly = toLoops(differencePolygons([ringB],[ringA]));
+  const common = toLoops(intersectPolygons([ringA],[ringB]));
+  if (!firstOnly || !secondOnly || !common || !common.length) return null;
+  return {first:firstOnly,second:secondOnly,intersection:common};
 }
 
 export type Box = { left: number; top: number; right: number; bottom: number };
