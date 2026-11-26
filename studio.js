@@ -46,6 +46,7 @@ const icons = {
   download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/>'
 };
 function icon(element, name) {
+  if (!Object.prototype.hasOwnProperty.call(icons,name)) return;
   element.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + icons[name] + '</svg>';
 }
 document.querySelectorAll('[data-icon]').forEach(
@@ -79,9 +80,11 @@ const identity = () => {
   return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-');
 };
 
+const storedName=(localStorage.getItem('qreasee-name') || 'Tamu')
+  .replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,32) || 'Tamu';
 /** @type {QreaseeState} */
 const state = {
-  room: '', client: identity(), name: localStorage.getItem('qreasee-name') || 'Tamu',
+  room: '', client: identity(), name: storedName,
   doc: null, meshes: [], plans: [], selected: new Set(), inside: null, tool: 'select', layout: false, busy: false,
   snapping: true, inference: null,
   undo: [], redo: [], drag: null, arcPending:null, linePending:null, linePress:null, drawPending:null,
@@ -568,11 +571,15 @@ const recentKey=()=> 'qreasee-recent:'+(window.qreaseeAuth?.userId || 'local');
 function recentProjects() {
   let local=[];
   try { local=JSON.parse(localStorage.getItem(recentKey()) || '[]'); } catch { /* Ignore damaged local history. */ }
-  const remote=window.qreaseeAuth?.recentProjects || [];
+  if (!Array.isArray(local)) local=[];
+  const remote=Array.isArray(window.qreaseeAuth?.recentProjects) ? window.qreaseeAuth.recentProjects : [];
   const merged=new Map();
   for (const item of [...local,...remote]) {
-    if (!item || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(item.id)) continue;
-    if (!merged.has(item.id) || item.updatedAt>merged.get(item.id).updatedAt) merged.set(item.id,item);
+    if (!item || typeof item.id!=='string' ||
+        !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(item.id)) continue;
+    const safe={id:item.id,title:String(item.title||'Proyek tanpa judul').slice(0,80),
+      updatedAt:Number(item.updatedAt)||0};
+    if (!merged.has(safe.id) || safe.updatedAt>merged.get(safe.id).updatedAt) merged.set(safe.id,safe);
   }
   return [...merged.values()].sort((a,b)=>b.updatedAt-a.updatedAt).slice(0,30);
 }
@@ -585,7 +592,8 @@ function renderProjectHome() {
   if (!projects.length) {
     const empty=document.createElement('div');
     empty.className='home-empty';
-    empty.innerHTML='<strong>Belum ada proyek terbaru</strong>Buat proyek baru untuk mulai menggambar bersama.';
+    const title=document.createElement('strong');title.textContent='Belum ada proyek terbaru';
+    empty.append(title,document.createTextNode('Buat proyek baru untuk mulai menggambar bersama.'));
     list.append(empty);
     return;
   }
@@ -627,7 +635,8 @@ async function openRoom(createBlank) {
   if (window.qreaseeAuth) {
     const session = await window.qreaseeAuth.ready;
     if (state.epoch !== epoch || !session) return;
-    state.name = window.qreaseeAuth.displayName.slice(0, 32);
+    state.name = String(window.qreaseeAuth.displayName||'Tamu')
+      .replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,32) || 'Tamu';
   }
   state.busy = false;
   state.room = '';
@@ -2878,7 +2887,9 @@ $('#share-role').onchange = event => {
   changeShareRole(/** @type {HTMLSelectElement} */ (event.target).value);
 };
 $('#display-name').onchange = event => {
-  state.name = event.target.value.trim() || 'Tamu';
+  state.name = String(event.target.value||'').replace(/[\u0000-\u001f\u007f]/g,'')
+    .trim().slice(0,32) || 'Tamu';
+  event.target.value=state.name;
   localStorage.setItem('qreasee-name', state.name);
   sync();
 };

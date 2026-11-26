@@ -53,8 +53,9 @@ window.qreaseeDemoPost = async (url, request) => {
   } catch (error) {
     const commentError=['invalid_comment','invalid_target','comment_limit','invalid_share'].includes(error.message);
     const accessError=['forbidden','read_only','comment_only'].includes(error.message);
+    const limited=error.message === 'rate_limited' || error.message === 'room_limit';
     const code = error.message === 'room_missing' ? 404 : error.message === 'conflict' ? 409 :
-      commentError ? 422 : accessError ? 403 :
+      commentError ? 422 : accessError ? 403 : limited ? 429 :
       error.message === 'login_required' || error.status === 401 || error.status === 403 ? 401 : 503;
     let changes;
     if (code === 409) {
@@ -69,6 +70,7 @@ window.qreaseeDemoPost = async (url, request) => {
     }
     return { code, data: { error: code === 503 ? 'Ruang bersama belum siap: ' + error.message :
       code === 401 ? 'Sesi berakhir. Masuk kembali dengan Google.' :
+      code === 429 ? 'Batas pembuatan proyek tercapai. Coba lagi nanti.' :
       code === 403 ? (error.message === 'forbidden' ? 'Hanya pemilik proyek yang dapat mengubah akses.' :
         error.message === 'comment_only' ? 'Akses ini hanya dapat menambah komentar.' :
         'Akses ini hanya dapat melihat proyek.') :
