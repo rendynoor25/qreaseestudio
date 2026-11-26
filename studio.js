@@ -4141,7 +4141,8 @@ function draw() {
   }
   const snapLabel=state.inference?.label || '';
   $('#snap-feedback').textContent=snapLabel;
-  $('#snap-feedback').dataset.kind=snapLabel==='Ujung'?'endpoint':snapLabel==='Titik tengah'?'midpoint':'';
+  $('#snap-feedback').dataset.kind=snapLabel==='Ujung'?'endpoint':
+    snapLabel==='Titik tengah'?'midpoint':snapLabel==='Perpotongan'?'intersection':'';
   if (state.inference) {
     const [x,y]=stagePoint(state.inference.world);
     if (Number.isFinite(x)) {
@@ -4150,7 +4151,8 @@ function draw() {
       else ctx.arc(x,y,4,0,Math.PI*2);
       ctx.fillStyle='#fff';
       ctx.fill();
-      ctx.strokeStyle=snapLabel==='Ujung'?'#f0913b':snapLabel==='Titik tengah'?'#e6bf19':'#00856d';
+      ctx.strokeStyle=snapLabel==='Ujung'?'#f0913b':snapLabel==='Titik tengah'?'#e6bf19':
+        snapLabel==='Perpotongan'?'#9b59b6':'#00856d';
       ctx.lineWidth=2;
       ctx.stroke();
     }
@@ -4463,18 +4465,41 @@ function onFaceBoundary(point,vertices) {
   return false;
 }
 
+/** @param {QreaseePoint} a @param {QreaseePoint} b @param {QreaseePoint} c @param {QreaseePoint} d @returns {{point: QreaseePoint, distance: number}|null} */
+function segmentClosestPoint(a,b,c,d) {
+  const u=b.map((value,index)=>value-a[index]);
+  const v=d.map((value,index)=>value-c[index]);
+  const w=a.map((value,index)=>value-c[index]);
+  const dot=(left,right)=>left.reduce((sum,value,index)=>sum+value*right[index],0);
+  const a2=dot(u,u),b2=dot(u,v),c2=dot(v,v),d2=dot(u,w),e2=dot(v,w);
+  const denominator=a2*c2-b2*b2;
+  let sc=0,tc=0;
+  if (denominator>1e-12) {
+    sc=clamp((b2*e2-c2*d2)/denominator,0,1);
+    tc=clamp((a2*e2-b2*d2)/denominator,0,1);
+  } else {
+    sc=0;
+    tc=c2>1e-12?clamp(e2/c2,0,1):0;
+  }
+  const p=a.map((value,index)=>value+u[index]*sc);
+  const q=c.map((value,index)=>value+v[index]*tc);
+  return {point:/** @type {QreaseePoint} */ (p.map((value,index)=>(value+q[index])/2)),
+    distance:Math.hypot(p[0]-q[0],p[1]-q[1],p[2]-q[2])};
+}
+
 /** @param {number[]} point @param {number|undefined} elevation @param {Set<string>=} excluded @param {(world: QreaseePoint)=>boolean=} accept @returns {QreaseeInference|null} */
 function infer(point, elevation, excluded = new Set(), accept) {
   if (!state.snapping) return null;
   let best=null;
-  const add=(world,label,penalty,owner)=>{
+  const add=(world,label,penalty,owner,force=false)=>{
     if (elevation!==undefined && Math.abs(world[2]-elevation)>.00001) return;
     if (accept && !accept(world)) return;
     const projected=stagePoint(world);
     if (!Number.isFinite(projected[0]) || !Number.isFinite(projected[1])) return;
     const distance=Math.hypot(projected[0]-point[0],projected[1]-point[1]);
     if (!(distance<=snapRadius)) return;
-    const hit=state.hits.findLast(face=>!excluded.has(face.object.id) && contains(projected,face.points));
+    const hit=!force&&state.hits.findLast(face=>!excluded.has(face.object.id) &&
+      contains(projected,face.points));
     if (hit && hit.object.id!==owner &&
         !(hit.object.shape==='polygon' && hit.object.height===0 && Math.abs(hit.object.z-world[2])<.00001) &&
         !onFaceBoundary(world,hit.world)) return;
@@ -4503,6 +4528,23 @@ function infer(point, elevation, excluded = new Set(), accept) {
       const fraction=clamp(((point[0]-p[0])*dx+(point[1]-p[1])*dy)/length,0,1);
       const t=fraction*p[3]/((1-fraction)*q[3]+fraction*p[3]);
       add(interpolate(a,b,t),'Pada tepi',10,owner);
+    }
+  }
+  const nearLines=state.hits.filter(face=>{
+    if (face.object.shape!=='line' || face.world.length!==2 || excluded.has(face.object.id))
+      return false;
+    const xs=face.points.map(item=>item[0]),ys=face.points.map(item=>item[1]);
+    return point[0]>=Math.min(...xs)-snapRadius && point[0]<=Math.max(...xs)+snapRadius &&
+      point[1]>=Math.min(...ys)-snapRadius && point[1]<=Math.max(...ys)+snapRadius;
+  });
+  for (let i=0;i<nearLines.length;i++) {
+    for (let j=i+1;j<nearLines.length;j++) {
+      const first=nearLines[i],second=nearLines[j];
+      if (first.object.id===second.object.id) continue;
+      const hit=segmentClosestPoint(first.world[0],first.world[1],
+        second.world[0],second.world[1]);
+      if (!hit || hit.distance>1e-4) continue;
+      add(hit.point,'Perpotongan',1.5,null,true);
     }
   }
   return best;
@@ -4585,7 +4627,8 @@ function pullChange(drag,point) {
 function lineTarget(point) {
   const candidate=drawingPoint(point);
   if (!state.linePending || !state.snapping) return candidate;
-  if (candidate && ['Ujung','Titik tengah','Pada tepi'].includes(candidate.label)) return candidate;
+  if (candidate && ['Ujung','Titik tengah','Pada tepi','Perpotongan'].includes(candidate.label))
+    return candidate;
   const axis=QreaseeLine.axisSnap(state.linePending.a,point,stagePoint);
   return axis || candidate;
 }
@@ -4750,7 +4793,7 @@ canvas.addEventListener('pointerdown',event=>{
       completeLinePoint(candidate.world);
       return;
     }
-    const initial=drawingPoint(start);
+    const initial=infer(start,undefined) || drawingPoint(start);
     if (!initial) { showStatus('Gunakan denah atau tampilan 3D untuk menggambar.');return; }
     state.linePress={start,initial:initial.world};
     state.inference=initial;
