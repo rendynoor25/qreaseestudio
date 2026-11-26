@@ -60,6 +60,8 @@ pub struct Object {
     pub container: Option<Box<Membership>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<Box<Profile>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wall_axis: Option<[f64; 2]>,
 }
 
 #[derive(Serialize)]
@@ -85,6 +87,11 @@ impl Object {
                 .into_iter()
                 .all(bounded)
             && dimensions.into_iter().all(bounded)
+            && self.wall_axis.is_none_or(|axis| {
+                self.shape == Shape::Rectangle
+                    && axis.iter().all(|value| value.is_finite())
+                    && (axis[0].hypot(axis[1]) - 1.0).abs() < 1e-5
+            })
             && self.container.as_deref().is_none_or(Membership::valid)
             && match (&self.shape, &self.profile) {
                 (Shape::Polygon, Some(profile)) => {
@@ -136,6 +143,49 @@ impl Object {
     }
 
     pub fn mesh(&self) -> Mesh {
+        if let Some(axis) = self.wall_axis {
+            let (sin, cos) = self.rotation.to_radians().sin_cos();
+            let u = [axis[0] * cos - axis[1] * sin, axis[0] * sin + axis[1] * cos];
+            let n = [u[1], -u[0]];
+            let w = self.width / 2.0;
+            let d = self.depth / 2.0;
+            let mut vertices: Vec<Point> = [[-w, -d], [w, -d], [w, d], [-w, d]]
+                .into_iter()
+                .map(|[along, vertical]| {
+                    [
+                        self.x + along * u[0],
+                        self.y + along * u[1],
+                        self.z + vertical,
+                    ]
+                })
+                .collect();
+            let mut faces = vec![vec![0, 1, 2, 3]];
+            if self.height > 0.0 {
+                vertices.extend(
+                    (0..4)
+                        .map(|i| {
+                            let point = vertices[i];
+                            [
+                                point[0] + self.height * n[0],
+                                point[1] + self.height * n[1],
+                                point[2],
+                            ]
+                        })
+                        .collect::<Vec<_>>(),
+                );
+                faces = vec![vec![3, 2, 1, 0]];
+                for i in 0..4 {
+                    faces.push(vec![i, (i + 1) % 4, (i + 1) % 4 + 4, i + 4]);
+                }
+                faces.push(vec![4, 5, 6, 7]);
+            }
+            return Mesh {
+                vertices,
+                faces,
+                cut: false,
+                cap: None,
+            };
+        }
         let outline = self.footprint();
         let layer = |z| outline.iter().map(move |[x, y]| [*x, *y, z]);
         let mut vertices: Vec<_> = layer(self.z).collect();
@@ -177,6 +227,35 @@ impl Object {
     }
 
     pub fn plan(&self, elevation: f64) -> Mesh {
+        if let Some(axis) = self.wall_axis {
+            if self.z - self.depth / 2.0 > elevation {
+                return Mesh {
+                    vertices: Vec::new(),
+                    faces: Vec::new(),
+                    cut: false,
+                    cap: None,
+                };
+            }
+            if self.z + self.depth / 2.0 > elevation {
+                let (sin, cos) = self.rotation.to_radians().sin_cos();
+                let u = [axis[0] * cos - axis[1] * sin, axis[0] * sin + axis[1] * cos];
+                let n = [u[1], -u[0]];
+                let vertices = [-self.width / 2.0, self.width / 2.0].map(|along| {
+                    [
+                        self.x + along * u[0] + self.height * n[0] / 2.0,
+                        self.y + along * u[1] + self.height * n[1] / 2.0,
+                        elevation,
+                    ]
+                });
+                return Mesh {
+                    vertices: vertices.to_vec(),
+                    faces: Vec::new(),
+                    cut: true,
+                    cap: None,
+                };
+            }
+            return self.mesh();
+        }
         if self.z > elevation {
             return Mesh {
                 vertices: Vec::new(),
@@ -466,6 +545,7 @@ pub fn demo() -> Document {
             color: color.into(),
             container: None,
             profile: None,
+            wall_axis: None,
         });
     };
     block("Pelat dasar", [0., 0., 0., 13., 8., 0.28], "#c1b5a2");
@@ -559,6 +639,28 @@ mod tests {
         let vertices = line.mesh().vertices;
         assert_eq!(vertices[0][2], 0.0);
         assert_eq!(vertices[1][2], 2.4);
+    }
+
+    #[test]
+    fn vertical_rectangle_renders_on_wall_and_cuts_plan() {
+        let mut rectangle = demo().objects.remove(0);
+        rectangle.wall_axis = Some([1.0, 0.0]);
+        rectangle.x = 2.0;
+        rectangle.y = 3.0;
+        rectangle.z = 1.5;
+        rectangle.width = 2.0;
+        rectangle.depth = 3.0;
+        rectangle.height = 0.0;
+        assert!(rectangle.valid());
+        let mesh = rectangle.mesh();
+        assert_eq!(mesh.faces, vec![vec![0, 1, 2, 3]]);
+        assert_eq!(mesh.vertices[0], [1.0, 3.0, 0.0]);
+        assert_eq!(mesh.vertices[2], [3.0, 3.0, 3.0]);
+        let plan = rectangle.plan(1.2);
+        assert_eq!(plan.vertices.len(), 2);
+        assert!(plan.vertices.iter().all(|point| point[2] == 1.2));
+        rectangle.wall_axis = Some([2.0, 0.0]);
+        assert!(!rectangle.valid());
     }
 
     #[test]

@@ -27,6 +27,19 @@ async function seedDocument() {
 function demoMeshes(document) {
   const meshes = document.objects.map(object => previewMesh(object));
   const plans = document.objects.map((object, index) => {
+    if (object.wall_axis) {
+      const mesh=demoCopy(meshes[index]);
+      const cut=document.sheet.cut_height;
+      if (object.z-object.depth/2>cut) return {vertices:[],faces:[],cut:false};
+      if (object.z+object.depth/2>cut) {
+        const angle=object.rotation*Math.PI/180,cos=Math.cos(angle),sin=Math.sin(angle);
+        const [ax,ay]=object.wall_axis,u=[ax*cos-ay*sin,ax*sin+ay*cos],n=[u[1],-u[0]];
+        return {vertices:[-object.width/2,object.width/2].map(along=>
+          [object.x+along*u[0]+object.height*n[0]/2,
+            object.y+along*u[1]+object.height*n[1]/2,cut]),faces:[],cut:true};
+      }
+      return mesh;
+    }
     if (object.z > document.sheet.cut_height) return { vertices: [], faces: [], cut: false };
     const mesh = demoCopy(meshes[index]);
     mesh.cut = object.height > 0 && object.z + object.height > document.sheet.cut_height;

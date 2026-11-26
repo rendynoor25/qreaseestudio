@@ -26,8 +26,40 @@ var QreaseeLine = (() => {
     connectedFaces: () => connectedFaces,
     connectedLines: () => connectedLines,
     polygonFromLoop: () => polygonFromLoop,
-    triangulate: () => triangulate
+    triangulate: () => triangulate,
+    verticalRectangle: () => verticalRectangle,
+    verticalWall: () => verticalWall
   });
+  function verticalWall(vertices) {
+    if (vertices.length < 3) return null;
+    const origin = vertices[0];
+    for (let i = 1; i < vertices.length - 1; i++) {
+      const a = vertices[i].map((value, index) => value - origin[index]);
+      const b = vertices[i + 1].map((value, index) => value - origin[index]);
+      const normal = [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0]
+      ];
+      const length = Math.hypot(...normal);
+      if (length < 1e-8) continue;
+      if (Math.abs(normal[2]) > length * 0.05) return null;
+      const horizontal = [normal[0] / length, normal[1] / length];
+      return { origin, axis: [-horizontal[1], horizontal[0]], normal: horizontal };
+    }
+    return null;
+  }
+  function verticalRectangle(a, b, axis) {
+    const along = (b[0] - a[0]) * axis[0] + (b[1] - a[1]) * axis[1];
+    return {
+      x: a[0] + axis[0] * along / 2,
+      y: a[1] + axis[1] * along / 2,
+      z: (a[2] + b[2]) / 2,
+      width: Math.abs(along),
+      depth: Math.abs(b[2] - a[2]),
+      wall_axis: axis
+    };
+  }
   var precision = 1e5;
   var key = (point) => point.slice(0, 2).map((value) => Math.round(value * precision)).join(":");
   var cross = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);

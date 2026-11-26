@@ -80,7 +80,10 @@ fn scope(object: &Object) -> Option<String> {
 
 fn segments(objects: &[Object]) -> BTreeMap<(Option<String>, i64), Vec<[Vertex; 2]>> {
     let mut planes = BTreeMap::<_, Vec<_>>::new();
-    for object in objects.iter().filter(|object| object.shape == Shape::Line && object.height == 0.0) {
+    for object in objects
+        .iter()
+        .filter(|object| object.shape == Shape::Line && object.height == 0.0)
+    {
         let points = object.footprint();
         let mut pair = [vertex(points[0]), vertex(points[1])];
         pair.sort_unstable();
@@ -321,6 +324,7 @@ fn new_face(region: &Loop) -> Option<Object> {
             points: profile,
             inferred: true,
         })),
+        wall_axis: None,
     };
     object.valid().then_some(object)
 }
@@ -366,7 +370,9 @@ fn add_faces<'a>(
     let existing: BTreeSet<_> = objects
         .iter()
         .filter(|object| {
-            object.height == 0.0 && matches!(object.shape, Shape::Polygon | Shape::Rectangle)
+            object.height == 0.0
+                && object.wall_axis.is_none()
+                && matches!(object.shape, Shape::Polygon | Shape::Rectangle)
         })
         .map(existing_face)
         .collect();
@@ -443,6 +449,7 @@ mod tests {
             color: "#000000".into(),
             container: None,
             profile: None,
+            wall_axis: None,
         }
     }
 

@@ -36,6 +36,7 @@ interface QreaseeObject {
   color: string;
   container?: QreaseeMembership | null;
   profile?: QreaseeProfile | null;
+  wall_axis?: QreaseePoint2 | null;
 }
 
 interface QreaseeSheet {

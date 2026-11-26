@@ -1,6 +1,32 @@
 export type Point = [number, number, number];
 export type XY = [number, number];
 
+export function verticalWall(vertices: readonly Point[]): { origin: Point; axis: XY; normal: XY } | null {
+  if (vertices.length < 3) return null;
+  const origin = vertices[0];
+  for (let i = 1; i < vertices.length - 1; i++) {
+    const a = vertices[i].map((value, index) => value - origin[index]);
+    const b = vertices[i + 1].map((value, index) => value - origin[index]);
+    const normal: Point = [a[1] * b[2] - a[2] * b[1],
+      a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    const length = Math.hypot(...normal);
+    if (length < 1e-8) continue;
+    if (Math.abs(normal[2]) > length * .05) return null;
+    const horizontal: XY = [normal[0] / length, normal[1] / length];
+    return { origin, axis: [-horizontal[1], horizontal[0]], normal: horizontal };
+  }
+  return null;
+}
+
+export function verticalRectangle(a: Point, b: Point, axis: XY): {
+  x: number; y: number; z: number; width: number; depth: number; wall_axis: XY;
+} {
+  const along = (b[0] - a[0]) * axis[0] + (b[1] - a[1]) * axis[1];
+  return { x: a[0] + axis[0] * along / 2, y: a[1] + axis[1] * along / 2,
+    z: (a[2] + b[2]) / 2, width: Math.abs(along), depth: Math.abs(b[2] - a[2]),
+    wall_axis: axis };
+}
+
 export interface LineObject {
   shape: string;
   x: number;

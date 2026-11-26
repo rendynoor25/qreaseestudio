@@ -55,7 +55,7 @@ const tools = {
   line: ['Garis', 'L', 'Klik titik awal, lalu klik titik berikutnya; ketik panjang untuk ukuran tepat'],
   arc: ['Busur', 'A', 'Tarik titik awal ke titik akhir, lalu klik untuk menentukan lengkung busur'],
   offset: ['Offset', 'I', 'Tarik dari bidang persegi atau lingkaran untuk membuat kontur sejajar'],
-  rectangle: ['Persegi panjang', 'R', 'Tarik persegi panjang pada bidang dasar'],
+  rectangle: ['Persegi panjang', 'R', 'Tarik pada bidang horizontal atau dinding vertikal'],
   circle: ['Lingkaran', 'C', 'Tarik dari pusat untuk mengatur radius'],
   pull: ['Push/Pull', 'P', 'Tarik bidang atas ke atas atau ke bawah'],
   move: ['Pindah', 'M', 'Tarik objek sejajar bidang dasar'],
@@ -699,8 +699,11 @@ function refresh(force = false) {
     : 'Klik untuk memilih objek. Gunakan Shift + klik untuk menambah pilihan.';
   if (object) {
     $('#selection-title').textContent = object.name;
-    const kind = object.shape === 'line' ? 'Garis' : object.height ? 'Bentuk 3D' : 'Bidang';
+    const kind = object.shape === 'line' ? 'Garis' : object.wall_axis ? 'Bidang vertikal' :
+      object.height ? 'Bentuk 3D' : 'Bidang';
     $('#selection-kind').textContent = kind;
+    $('#dimension-depth-label').textContent=object.wall_axis?'Tinggi bidang':'Lebar';
+    $('#dimension-height-label').textContent=object.wall_axis?'Tebal':'Tinggi';
     icon($('#object-glyph'), object.shape === 'line' ? 'line' : object.height ? 'cube' : object.shape);
     if (force || objectBaseline?.id !== object.id || form.dataset.dirty !== 'yes') {
       Object.entries(object).forEach(([key,value]) => {
@@ -1479,6 +1482,24 @@ function draw() {
 
 /** @param {QreaseeObject} object @returns {QreaseeMesh} */
 function previewMesh(object) {
+  if (object.wall_axis) {
+    const angle=object.rotation*Math.PI/180;
+    const cos=Math.cos(angle),sin=Math.sin(angle);
+    const [ux,uy]=object.wall_axis;
+    const u=[ux*cos-uy*sin,ux*sin+uy*cos], n=[u[1],-u[0]];
+    const w=object.width/2,d=object.depth/2;
+    /** @type {QreaseePoint[]} */
+    const vertices=[[-w,-d],[w,-d],[w,d],[-w,d]].map(([along,vertical])=>
+      /** @type {QreaseePoint} */ ([object.x+along*u[0],object.y+along*u[1],object.z+vertical]));
+    const faces=[[0,1,2,3]];
+    if (object.height>0) {
+      vertices.push(...vertices.map(([x,y,z])=>/** @type {QreaseePoint} */ ([x+object.height*n[0],y+object.height*n[1],z])));
+      faces.splice(0,1,[3,2,1,0]);
+      for(let i=0;i<4;i++) faces.push([i,(i+1)%4,(i+1)%4+4,i+4]);
+      faces.push([4,5,6,7]);
+    }
+    return {vertices,faces,cut:false};
+  }
   const w=object.width/2, d=object.depth/2;
   const angle=object.rotation*Math.PI/180, sin=Math.sin(angle), cos=Math.cos(angle);
   /** @type {QreaseePoint2[]} */
@@ -1571,6 +1592,24 @@ function orbitPivot(point) {
   const t=dot(normal,a.map((value,i)=>value-origin[i]))/divisor;
   if (!Number.isFinite(t) || (camera.perspective && t<0)) return [...a];
   return origin.map((value,i)=>value+t*ray[i]);
+}
+
+/** @param {QreaseePoint2} point @param {QreaseePoint} origin @param {QreaseePoint2} horizontalNormal @returns {QreaseePoint|null} */
+function pointOnVerticalPlane(point,origin,horizontalNormal) {
+  const [right,down,depth]=cameraAxes();
+  const u=(point[0]-canvas.clientWidth/2-camera.x)/camera.scale;
+  const v=(point[1]-canvas.clientHeight/2-camera.y)/camera.scale;
+  const eye=camera.perspective
+    ? camera.center.map((value,i)=>value+camera.distance*depth[i])
+    : camera.center.map((value,i)=>value+u*right[i]+v*down[i]);
+  const ray=camera.perspective
+    ? depth.map((value,i)=>u*right[i]+v*down[i]-camera.distance*value)
+    : depth;
+  const divisor=horizontalNormal[0]*ray[0]+horizontalNormal[1]*ray[1];
+  if (Math.abs(divisor)<1e-8) return null;
+  const t=(horizontalNormal[0]*(origin[0]-eye[0])+horizontalNormal[1]*(origin[1]-eye[1]))/divisor;
+  if (!Number.isFinite(t) || (camera.perspective && t<0)) return null;
+  return /** @type {QreaseePoint} */ (eye.map((value,i)=>value+t*ray[i]));
 }
 
 /** @param {number[]} point @param {number|undefined} elevation @param {Set<string>=} excluded @returns {QreaseeInference|null} */
@@ -1751,7 +1790,8 @@ canvas.addEventListener('pointerdown',event=>{
       return;
     }
     if (tool==='offset') {
-      if (!object || state.inside || targetId(object)!==object.id || object.height!==0 || !['rectangle','circle'].includes(object.shape)) {
+      if (!object || state.inside || targetId(object)!==object.id || object.wall_axis ||
+          object.height!==0 || !['rectangle','circle'].includes(object.shape)) {
         showStatus('Offset tersedia untuk bidang persegi atau lingkaran datar di luar Group.');return;
       }
       const origin=ground(start,object.z);
@@ -1824,6 +1864,16 @@ canvas.addEventListener('pointerdown',event=>{
       if (!initial) { showStatus('Gunakan denah atau tampilan 3D untuk mengukur.');return; }
       state.drag={tool,start,initial:initial.world};
     } else {
+      if (tool==='rectangle' && face) {
+        const wall=QreaseeLine.verticalWall(face.world);
+        if (wall) {
+          const initial=pointOnVerticalPlane(start,wall.origin,wall.normal);
+          if (!initial) {showStatus('Arah pandang sejajar bidang vertikal. Putar kamera sedikit.');return;}
+          state.drag={tool,start,initial,id:identity(),wall};
+          canvas.setPointerCapture(event.pointerId);
+          return;
+        }
+      }
       const initial=drawingPoint(start);
       if (!initial) { showStatus('Gunakan denah atau aksonometri untuk menggambar.');return; }
       state.drag={tool,start,initial:initial.world,id:identity()};
@@ -1964,7 +2014,16 @@ canvas.addEventListener('pointermove',event=>{
       : 'Pindah · ΔX '+delta[0].toFixed(3)+'  ΔY '+delta[1].toFixed(3));
   } else {
     const a=drag.initial;
-    let candidate=drawingPoint(point,drag.tool==='line'?undefined:a[2]);
+    let candidate=drag.tool==='rectangle' && drag.wall
+      ? {world:pointOnVerticalPlane(point,drag.wall.origin,drag.wall.normal),label:'Bidang vertikal'}
+      : drawingPoint(point,drag.tool==='line'?undefined:a[2]);
+    if (!candidate?.world) { drag.preview=null;redraw();return; }
+    if (drag.tool==='rectangle' && drag.wall && state.snapping) {
+      const delta=candidate.world.map((value,i)=>value-a[i]);
+      const along=snap(delta[0]*drag.wall.axis[0]+delta[1]*drag.wall.axis[1]);
+      const vertical=snap(delta[2]);
+      candidate.world=[a[0]+along*drag.wall.axis[0],a[1]+along*drag.wall.axis[1],a[2]+vertical];
+    }
     if (drag.tool==='line' && state.snapping &&
         !['Ujung','Titik tengah','Pada tepi'].includes(candidate?.label)) {
       candidate=QreaseeLine.axisSnap(a,point,stagePoint) || candidate;
@@ -1979,6 +2038,8 @@ canvas.addEventListener('pointermove',event=>{
       shape:drag.tool,x:circle?a[0]:(a[0]+b[0])/2,y:circle?a[1]:(a[1]+b[1])/2,z:a[2],
       width:circle?radius*2:line?x:Math.abs(x),depth:circle?radius*2:line?y:Math.abs(y),
       height:line?b[2]-a[2]:0,rotation:0,color:'#dfcbb8'};
+    if (drag.tool==='rectangle' && drag.wall)
+      Object.assign(drag.preview,QreaseeLine.verticalRectangle(a,b,drag.wall.axis));
     if (line) state.cursor={mode:'model',x:round(b[0]),y:round(b[1]),z:round(b[2]),
       line:{a:roundPoint(a),b:roundPoint(b)}};
   }
