@@ -106,7 +106,7 @@ impl Object {
                 .all(bounded)
             && dimensions.into_iter().all(bounded)
             && self.wall_axis.is_none_or(|axis| {
-                matches!(self.shape, Shape::Rectangle | Shape::Polygon)
+                matches!(self.shape, Shape::Rectangle | Shape::Polygon | Shape::Circle)
                     && axis.iter().all(|value| value.is_finite())
                     && (axis[0].hypot(axis[1]) - 1.0).abs() < 1e-5
             })
@@ -213,12 +213,21 @@ impl Object {
             let n = [u[1], -u[0]];
             let w = self.width / 2.0;
             let d = self.depth / 2.0;
-            let outline: Vec<_> = if let Some(profile) = &self.profile {
+            let outline: Vec<_> = if self.shape == Shape::Circle {
+                (0..48)
+                    .map(|i| {
+                        let angle = i as f64 * TAU / 48.0;
+                        [w * angle.cos(), d * angle.sin()]
+                    })
+                    .collect()
+            } else if let Some(profile) = &self.profile {
                 profile.points.iter().map(|p| [p[0] * self.width, p[1] * self.depth]).collect()
             } else {
                 vec![[-w, -d], [w, -d], [w, d], [-w, d]]
             };
             let count = outline.len();
+            let sides_only =
+                self.surface_role.as_deref() == Some("side") && self.shape == Shape::Circle;
             let mut vertices: Vec<Point> = outline.into_iter()
                 .map(|[along, vertical]| {
                     [
@@ -233,7 +242,15 @@ impl Object {
                 || vec![(0..count).collect()],
                 |triangles| triangles.iter().map(|triangle| triangle.to_vec()).collect(),
             );
-            let mut faces = top.clone();
+            if sides_only && self.height == 0.0 {
+                return Mesh {
+                    vertices: Vec::new(),
+                    faces: Vec::new(),
+                    cut: false,
+                    cap: None,
+                };
+            }
+            let mut faces = if sides_only { Vec::new() } else { top.clone() };
             if self.height > 0.0 {
                 vertices.extend(
                     (0..count)
@@ -247,11 +264,15 @@ impl Object {
                         })
                         .collect::<Vec<_>>(),
                 );
-                faces = top.iter().map(|face| face.iter().rev().copied().collect()).collect();
+                if !sides_only {
+                    faces = top.iter().map(|face| face.iter().rev().copied().collect()).collect();
+                }
                 for i in 0..count {
                     faces.push(vec![i, (i + 1) % count, (i + 1) % count + count, i + count]);
                 }
-                faces.extend(top.iter().map(|face| face.iter().map(|index| index + count).collect()));
+                if !sides_only {
+                    faces.extend(top.iter().map(|face| face.iter().map(|index| index + count).collect()));
+                }
             }
             return Mesh {
                 vertices,
@@ -336,7 +357,13 @@ impl Object {
                 let (sin, cos) = self.rotation.to_radians().sin_cos();
                 let u = [axis[0] * cos - axis[1] * sin, axis[0] * sin + axis[1] * cos];
                 let n = [u[1], -u[0]];
-                let vertices = [-self.width / 2.0, self.width / 2.0].map(|along| {
+                let half = if self.shape == Shape::Circle {
+                    let ratio = ((elevation - self.z) / (self.depth / 2.0)).clamp(-1.0, 1.0);
+                    self.width / 2.0 * (1.0 - ratio * ratio).max(0.0).sqrt()
+                } else {
+                    self.width / 2.0
+                };
+                let vertices = [-half, half].map(|along| {
                     [
                         self.x + along * u[0] + self.height * n[0] / 2.0,
                         self.y + along * u[1] + self.height * n[1] / 2.0,
@@ -747,6 +774,32 @@ mod tests {
         assert_eq!(mesh.faces.len(), 48);
         assert!(mesh.faces.iter().all(|face| face.len() == 4));
         assert!(mesh.cap.is_none());
+    }
+
+    #[test]
+    fn vertical_circle_renders_in_wall_plane() {
+        let mut circle = demo().objects.remove(0);
+        circle.shape = Shape::Circle;
+        circle.wall_axis = Some([1.0, 0.0]);
+        circle.x = 2.0;
+        circle.y = -1.5;
+        circle.z = 1.5;
+        circle.width = 2.0;
+        circle.depth = 2.0;
+        circle.height = 0.0;
+        assert!(circle.valid());
+        let mesh = circle.mesh();
+        assert_eq!(mesh.vertices.len(), 48);
+        assert_eq!(mesh.faces.len(), 1);
+        assert!(mesh.vertices.iter().all(|point| (point[1] + 1.5).abs() < 1e-9));
+        assert!((mesh.vertices[12][2] - 2.5).abs() < 1e-9);
+        circle.solid_id = Some(uuid::Uuid::new_v4().to_string());
+        circle.surface_role = Some("side".into());
+        circle.height = 1.0;
+        let side = circle.mesh();
+        assert_eq!(side.vertices.len(), 96);
+        assert_eq!(side.faces.len(), 48);
+        assert!(side.cap.is_none());
     }
 
     #[test]
