@@ -62,7 +62,7 @@ const tools = {
   rotate: ['Rotate', '', 'Klik pusat rotasi, lalu tentukan sudut; ketik angka lalu Enter untuk presisi'],
   scale: ['Skala', 'S', 'Tarik dari objek untuk mengubah ukurannya secara proporsional'],
   erase: ['Penghapus', 'E', 'Klik objek untuk menghapus; Ctrl+Z untuk mengurungkan'],
-  measure: ['Ukur', 'T', 'Tarik antara dua titik untuk membaca jarak pada bidang gambar'],
+  measure: ['Ukur', 'T', 'Klik titik awal, lalu gerakkan kursor untuk membaca jarak sampai titik akhir'],
   orbit: ['Orbit', 'O', 'Tarik untuk memutar kamera'],
   pan: ['Geser kamera', 'H', 'Tarik untuk menggeser kamera']
 };
@@ -82,7 +82,7 @@ const state = {
   doc: null, meshes: [], plans: [], selected: new Set(), inside: null, tool: 'select', layout: false, busy: false,
   snapping: true, inference: null,
   undo: [], redo: [], drag: null, arcPending:null, linePending:null, linePress:null, drawPending:null,
-  movePending:null, rotatePending:null, offsetPending:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null
+  movePending:null, rotatePending:null, offsetPending:null, measurePending:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null
 };
 const canvas = $('#viewport');
 const ctx = canvas.getContext('2d');
@@ -171,6 +171,7 @@ function setTool(tool) {
     state.movePending=null;
     state.rotatePending=null;
     state.offsetPending=null;
+    state.measurePending=null;
     state.hoverKey=null;
     if (state.cursor) delete state.cursor.line;
     $('#line-length').value='';
@@ -551,6 +552,7 @@ async function openRoom(createBlank) {
   state.movePending = null;
   state.rotatePending = null;
   state.offsetPending = null;
+  state.measurePending = null;
   $('#line-length-control').hidden=state.layout || !['line','rectangle','circle','arc','pull','rotate','offset'].includes(state.tool);
   $('#line-length').value='';
   state.undo = [];
@@ -2267,15 +2269,33 @@ function draw() {
     if (mesh.faces.length) { ctx.fillStyle = '#f0913b38'; ctx.fill(); }
     ctx.strokeStyle = '#bf671c'; ctx.lineWidth = 1.5; ctx.stroke();
   }
-  if (drag?.tool==='measure' && drag.end) {
-    const a=stagePoint(drag.initial), b=stagePoint(drag.end);
-    if (Number.isFinite(a[0]) && Number.isFinite(b[0])) {
-      strokeLine(a,b,'#bf671c',2);
-      for (const [x,y] of [a,b]) { ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#bf671c';ctx.stroke(); }
-      const label=lengthLabel(drag.distance);
-      ctx.font='bold 12px Segoe UI, sans-serif';
-      ctx.fillStyle='#fff';ctx.fillRect((a[0]+b[0])/2-5,(a[1]+b[1])/2-18,ctx.measureText(label).width+10,19);
-      ctx.fillStyle='#703b11';ctx.fillText(label,(a[0]+b[0])/2,(a[1]+b[1])/2-4);
+  const measurement=state.measurePending;
+  if (measurement) {
+    const a=stagePoint(measurement.origin), b=measurement.end?stagePoint(measurement.end):null;
+    if (Number.isFinite(a[0]) && (!b || Number.isFinite(b[0]))) {
+      ctx.save();
+      if (b) {
+        strokeLine(a,b,'#bf671c',2);
+        for (const [x,y] of [a,b]) {
+          ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);
+          ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#bf671c';ctx.stroke();
+        }
+        const label=lengthLabel(measurement.distance);
+        ctx.font='bold 12px Segoe UI, sans-serif';
+        const width=ctx.measureText(label).width+14,height=20;
+        const left=clamp(b[0]+10,4,canvas.clientWidth-width-4);
+        const top=clamp(b[1]-height-8,4,canvas.clientHeight-height-4);
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(left,top,width,height,4);
+        else ctx.rect(left,top,width,height);
+        ctx.fillStyle='#fffdf8';ctx.fill();
+        ctx.strokeStyle='#bf671c';ctx.lineWidth=1;ctx.stroke();
+        ctx.fillStyle='#703b11';ctx.fillText(label,left+7,top+14);
+      } else {
+        ctx.beginPath();ctx.arc(a[0],a[1],4,0,Math.PI*2);
+        ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#bf671c';ctx.stroke();
+      }
+      ctx.restore();
     }
   }
   if (state.movePending?.destination) {
@@ -3039,6 +3059,15 @@ canvas.addEventListener('pointerdown',event=>{
       return;
     }
     const object=face?.object;
+    if (tool==='measure') {
+      const origin=drawingPoint(start);
+      if (!origin) {showStatus('Gunakan denah atau tampilan 3D untuk mengukur.');return;}
+      state.measurePending={origin:origin.world,elevation:origin.world[2],end:null,distance:0};
+      state.inference=origin.label?origin:null;
+      showStatus('Titik awal ukur ditetapkan. Gerakkan kursor ke titik akhir.');
+      redraw();
+      return;
+    }
     if (tool==='scale') {
       const id=targetId(object);
       const group=members(id);
@@ -3073,9 +3102,9 @@ canvas.addEventListener('pointerdown',event=>{
       state.drag={tool,start,object,sources,owned,elevation,origin,anchor:[...(origin||[0,0]),elevation]};
     } else if (tool==='arc' && state.inside) {
       showStatus('Keluar dari Edit isi sebelum menggambar busur.');return;
-    } else if (tool==='arc' || tool==='measure') {
+    } else if (tool==='arc') {
       const initial=drawingPoint(start);
-      if (!initial) { showStatus('Gunakan denah atau tampilan 3D untuk mengukur.');return; }
+      if (!initial) { showStatus('Gunakan denah atau tampilan 3D untuk memasang busur.');return; }
       state.drag={tool,start,initial:initial.world};
     } else {
       if ((tool==='rectangle'||tool==='circle') && planeWall) {
@@ -3116,6 +3145,21 @@ canvas.addEventListener('pointermove',event=>{
     state.hoverKey=hovered ? (hovered.smooth ? hovered.object.id : hovered.key) : null;
   } else state.hoverKey=null;
   if (!drag) {
+    if (state.measurePending) {
+      const pending=state.measurePending;
+      const candidate=drawingPoint(point,pending.elevation);
+      pending.end=candidate?.world||null;
+      pending.distance=pending.end
+        ? Math.hypot(pending.end[0]-pending.origin[0],pending.end[1]-pending.origin[1]) : 0;
+      state.inference=candidate?.label?candidate:null;
+      if (pending.end) {
+        state.cursor={mode:'model',x:round(pending.end[0]),y:round(pending.end[1]),z:round(pending.end[2])};
+        updateCoordinates();
+        showStatus('Jarak '+lengthLabel(pending.distance)+' · klik untuk titik awal baru.');
+      }
+      redraw();
+      return;
+    }
     if (state.movePending) {
       const pending=state.movePending;
       pending.pointer=point;
@@ -3258,13 +3302,6 @@ canvas.addEventListener('pointermove',event=>{
     drag.end=candidate?.world||null;
     state.inference=candidate?.label?candidate:null;
     if (drag.end) showStatus('Klik berikutnya untuk menentukan lengkung busur.');
-  } else if (drag.tool==='measure') {
-    const candidate=drawingPoint(point,drag.initial[2]);
-    if (!candidate) { drag.end=null;redraw();return; }
-    drag.end=candidate.world;
-    drag.distance=Math.hypot(drag.end[0]-drag.initial[0],drag.end[1]-drag.initial[1]);
-    state.inference=candidate.label?candidate:null;
-    showStatus('Jarak '+lengthLabel(drag.distance));
   } else if (drag.tool==='scale') {
     const end=ground(point,drag.elevation);
     if (!end) { drag.updates=null;redraw();return; }
@@ -3312,7 +3349,7 @@ canvas.addEventListener('pointermove',event=>{
     if (!candidate) { drag.preview=null;redraw();return; }
     state.inference=candidate.label?candidate:null;
     const b=candidate.world;
-    drag.preview=drag.tool==='arc'||drag.tool==='measure'?null:shapePreview(drag,b);
+    drag.preview=drag.tool==='arc'?null:shapePreview(drag,b);
     if (drag.tool==='line') state.cursor={mode:'model',x:round(b[0]),y:round(b[1]),z:round(b[2]),
       line:{a:roundPoint(a),b:roundPoint(b)}};
   }
@@ -3402,6 +3439,8 @@ window.addEventListener('keydown',event=>{
     if (state.movePending) {state.movePending=null;state.inference=null;setTool('select');redraw();return;}
     if (state.rotatePending) {state.rotatePending=null;state.inference=null;setTool('select');redraw();return;}
     if (state.offsetPending) {state.offsetPending=null;state.inference=null;setTool('select');redraw();return;}
+    if (state.measurePending) {state.measurePending=null;state.inference=null;
+      showStatus('Pengukuran dibatalkan. Klik titik awal baru atau Esc untuk keluar.');redraw();return;}
     if (state.linePending) {finishLine();setTool('select');return;}
     if (typing) return;
     if (state.inside) {exitContainer();return;}
