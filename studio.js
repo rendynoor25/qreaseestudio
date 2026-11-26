@@ -147,6 +147,8 @@ let objectBaseline = null;
 /** @type {QreaseeSheet|null} */
 let sheetBaseline = null;
 let frame = 0;
+let sceneCache = null;
+const treeCache = {doc:undefined,inside:undefined,match:undefined};
 
 for (const [id, [label, key]] of Object.entries(tools)) {
   const button = document.createElement('button');
@@ -674,9 +676,11 @@ async function commit(edit, success) {
   const epoch = state.epoch;
   state.busy = true;
   refreshButtons();
+  const rollback=previewRemoval(edit);
   try {
     const result = await exchange(edit);
     if (state.epoch !== epoch) return false;
+    if (result.code !== 200) rollback?.();
     if (result.data.peers) accept(result.data);
     if (result.code !== 200) {
       if (result.code === 409) refresh(true);
@@ -689,7 +693,10 @@ async function commit(edit, success) {
     refresh(true);
     return true;
   } catch {
-    if (state.epoch === epoch) showStatus('Sambungan terputus saat menyimpan. Revisi akan diperiksa ulang.');
+    if (state.epoch === epoch) {
+      rollback?.();
+      showStatus('Sambungan terputus saat menyimpan. Revisi akan diperiksa ulang.');
+    }
     return false;
   } finally {
     if (state.epoch === epoch) {
@@ -697,6 +704,28 @@ async function commit(edit, success) {
       refreshButtons();
     }
   }
+}
+
+function previewRemoval(edit) {
+  const removed=edit.type==='object' && edit.before && !edit.after
+    ?[edit.before]:edit.type==='batch' && edit.before?.length && !edit.after?.length
+      ?edit.before:null;
+  if(!removed || !state.doc) return null;
+  const ids=new Set(removed.map(object=>object.id));
+  const snapshot={doc:state.doc,meshes:state.meshes,plans:state.plans,
+    selected:new Set(state.selected),inside:state.inside};
+  const keep=state.doc.objects.map(object=>!ids.has(object.id));
+  state.doc={...state.doc,objects:state.doc.objects.filter((_,index)=>keep[index])};
+  state.meshes=state.meshes.filter((_,index)=>keep[index]);
+  state.plans=state.plans.filter((_,index)=>keep[index]);
+  state.selected=new Set([...state.selected].filter(id=>!ids.has(id)));
+  refresh(true);
+  showStatus('Menghapus objek…');
+  return ()=>{
+    state.doc=snapshot.doc;state.meshes=snapshot.meshes;state.plans=snapshot.plans;
+    state.selected=snapshot.selected;state.inside=snapshot.inside;
+    refresh(true);
+  };
 }
 
 function edit(before, after, type = 'object', select = true) {
@@ -827,6 +856,17 @@ function renderTree() {
   const match = $('#search').value.trim().toLowerCase();
   const objects = state.doc?.objects || [];
   const list = $('#objects');
+  if (treeCache.doc===state.doc && treeCache.inside===state.inside && treeCache.match===match) {
+    for (const button of list.querySelectorAll('.tree-row')) {
+      const selected=state.selected.has(button.dataset.objectId);
+      button.classList.toggle('selected',selected);
+      button.setAttribute('aria-pressed',String(selected));
+    }
+    return;
+  }
+  treeCache.doc=state.doc;
+  treeCache.inside=state.inside;
+  treeCache.match=match;
   $('#object-count').textContent = objects.length;
   const scroll = list.scrollTop;
   list.replaceChildren();
@@ -841,6 +881,7 @@ function renderTree() {
     icon(glyph,glyphName);
     label.textContent = name;
     button.className = 'tree-row' + (state.selected.has(id) ? ' selected' : '') + (child?' child-row':'');
+    button.dataset.objectId=id;
     button.setAttribute('aria-pressed', String(state.selected.has(id)));
     button.append(glyph, label);
     button.onclick = event => select(id,event.shiftKey);
@@ -1287,7 +1328,81 @@ function shellFromObject(source,extruded) {
   return {bottom,top,pieces:[bottom,top,...connectionFaces(bottom,target,solidId)]};
 }
 
+/** @param {QreaseePoint[]} loop @returns {string|null} */
+function loopPlaneKey(loop) {
+  if (loop.length<3) return null;
+  const a=loop[0];
+  let normal=null;
+  for (let i=1;i<loop.length-1;i++) {
+    const ab=[loop[i][0]-a[0],loop[i][1]-a[1],loop[i][2]-a[2]];
+    const ac=[loop[i+1][0]-a[0],loop[i+1][1]-a[1],loop[i+1][2]-a[2]];
+    const n=[ab[1]*ac[2]-ab[2]*ac[1],ab[2]*ac[0]-ab[0]*ac[2],ab[0]*ac[1]-ab[1]*ac[0]];
+    const length=Math.hypot(...n);
+    if (length>1e-9) {normal=n.map(value=>value/length);break;}
+  }
+  if (!normal) return null;
+  if (normal.find(value=>Math.abs(value)>1e-9)<0) normal=normal.map(value=>-value);
+  const key=normal.map(value=>Math.round(value*1e4)).join(',')+':'+Math.round(dotPoint(normal,a)*1e4);
+  return key;
+}
+
+/** @param {QreaseePoint[]} loop @param {QreaseeObject} template @param {string=} name */
+function polygonFace(loop,template,name=template.name) {
+  const face=QreaseeLine.polygonFromLoop(loop);
+  if (!face) return null;
+  return {...template,id:identity(),name:name.slice(0,64),shape:'polygon',...face,height:0,rotation:0,
+    profile:{...face.profile,inferred:false},solid_id:null,surface_role:null,opening_id:null,
+    opening_origin:null,wall_axis:null};
+}
+
+/** @param {QreaseeObject} object */
+/** @param {QreaseeObject} object */
+function placePlanarFace(object) {
+  const loop=previewMesh({...object,height:0}).vertices;
+  const key=loopPlaneKey(loop);
+  if (!key) return addObject(object,false);
+  const candidates=[];
+  for (const item of objects()) {
+    if (item.id===object.id || item.height!==0 || item.solid_id || item.opening_id ||
+        state.inside || targetId(item)!==item.id ||
+        !['rectangle','circle','polygon'].includes(item.shape)) continue;
+    const shapeLoop=previewMesh({...item,height:0}).vertices;
+    if (loopPlaneKey(shapeLoop)!==key) continue;
+    const pair=QreaseeLine.splitOverlappingLoops(loop,shapeLoop);
+    if (pair?.intersection.length) candidates.push({object:item,loop:shapeLoop,pair});
+  }
+  if (!candidates.length) return addObject(object,false);
+  let remaining=[loop];
+  for (const candidate of candidates) {
+    const next=[];
+    for (const region of remaining) {
+      const pair=QreaseeLine.splitOverlappingLoops(region,candidate.loop);
+      if (!pair) next.push(region); else next.push(...pair.first);
+    }
+    remaining=next;
+  }
+  const after=[];
+  for (const candidate of candidates) {
+    candidate.pair.second.forEach((piece,index)=>{
+      const face=polygonFace(piece,candidate.object);
+      if (face) {if(index===0) face.id=candidate.object.id;after.push(face);}
+    });
+    candidate.pair.intersection.forEach(piece=>{
+      const face=polygonFace(piece,object,'Irisan '+object.name);
+      if (face) after.push(face);
+    });
+  }
+  remaining.forEach(piece=>{
+    const face=polygonFace(piece,object);
+    if (face) after.push(face);
+  });
+  if (!after.length) return addObject(object,false);
+  return batch(candidates.map(candidate=>candidate.object),after,[]);
+}
+
 function insertRectangle(object,host) {
+  const plainHost=!host || (!host.solid_id && host.height===0);
+  if (!object.wall_axis && !state.inside && plainHost) return placePlanarFace(object);
   if (!host || targetId(host)!==host.id || state.inside !== (host.container?.id??null))
     return addObject(object,false);
   if (host.height===0 && !host.solid_id) {
@@ -2035,7 +2150,14 @@ function draw() {
       meshes=objects.map((object,i)=>preview.has(object.id)?previewMesh(preview.get(object.id)):meshes[i]);
       objects=objects.map(object=>preview.get(object.id)||object);
     }
-    state.hits = scene(meshes,objects,stagePoint);
+    const sceneKey=updates?null:JSON.stringify([width,height,camera.yaw,camera.pitch,
+      camera.axes,camera.center,camera.x,camera.y,camera.scale,camera.distance,camera.perspective]);
+    if (sceneCache && !updates && sceneCache.meshes===meshes && sceneCache.objects===objects &&
+        sceneCache.key===sceneKey) state.hits=sceneCache.faces;
+    else {
+      state.hits=scene(meshes,objects,stagePoint);
+      if(!updates) sceneCache={meshes,objects,key:sceneKey,faces:state.hits};
+    }
     for (const face of state.hits) {
       const selected = state.selected.has(targetId(face.object));
       const hovered = !selected && state.hoverKey &&
@@ -2315,9 +2437,8 @@ function previewMesh(object) {
   }
   if (n>2) {
     const base=Array.from({length:n},(_,i)=>i);
-    const source=state.doc?.objects.findIndex(item=>item.id===object.id);
-    const top=state.meshes[source]?.cap || (object.shape==='polygon'
-      ? QreaseeLine.triangulate(object.profile.points) : [base]);
+    const top=object.shape==='polygon'
+      ? QreaseeLine.triangulate(object.profile.points) : [base];
     if (object.height>0) {
       vertices.push(...layer(object.z+object.height));
       faces.push(...top.map(face=>[...face].reverse()),...base.map(i=>[i,(i+1)%n,(i+1)%n+n,i+n]),
@@ -2714,7 +2835,7 @@ canvas.addEventListener('pointerdown',event=>{
     state.drawPending=null;
     $('#line-length').value='';
     if (tool==='rectangle') insertRectangle(object,pending.host);
-    else addObject(object,false);
+    else placePlanarFace(/** @type {QreaseeObject} */ (object));
     redraw();
     return;
   }
@@ -3175,7 +3296,7 @@ canvas.addEventListener('pointerup',()=>{
     if (valid) {
       if (drag.tool==='rectangle') insertRectangle(object,drag.host);
       else if (drag.tool==='line') addLineObject(object);
-      else addObject(object,false);
+      else placePlanarFace(object);
       $('#line-length').value='';
     }
   } else if (drag?.updates && drag.updates.some((object,i)=>JSON.stringify(object)!==JSON.stringify(drag.sources[i]))) {
