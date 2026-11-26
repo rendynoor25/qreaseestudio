@@ -298,8 +298,19 @@ async function completeLinePoint(point) {
   const object=lineObject(a,point);
   if (!object) return false;
   $('#line-length').value='';
-  const saved=await addObject(object);
+  const loop=QreaseeLine.closedLoop(objects(),object);
+  const face=loop && QreaseeLine.polygonFromLoop(loop);
+  const polygon=face && {id:identity(),name:'Bidang dari garis',shape:'polygon',
+    ...face,height:0,rotation:0,color:'#dfcbb8'};
+  const saved=polygon && window.qreaseeDemoPost && !state.inside
+    ? await batch([],[object,polygon],[])
+    : await addObject(object);
   if (saved && state.tool==='line' && state.linePending?.a===a) {
+    if (polygon) {
+      finishLine();
+      showStatus('Loop tertutup menjadi bidang. Gunakan Push/Pull untuk memberi tinggi.');
+      return true;
+    }
     state.linePending={a:[...point],b:null,preview:[[...point]]};
     if (state.cursor) delete state.cursor.line;
     $('#line-length').value='';
@@ -367,6 +378,8 @@ $('#unit-select').onchange=event=>{
   const before=unitFactors[displayUnit],after=unitFactors[next];
   convertFormUnits($('#object-form'),lengthFields,before,after);
   convertFormUnits($('#sheet-form'),['cut_height'],before,after);
+  const lineLength=$('#line-length');
+  if (lineLength.value!=='') lineLength.value=Number((Number(lineLength.value)*after/before).toFixed(4));
   displayUnit=next;
   document.querySelectorAll('.unit-label').forEach(label=>label.textContent=next);
   $('#line-unit').textContent=next;
@@ -735,7 +748,16 @@ function renderTree() {
     if (matchingContainers.has(id)) button.ondblclick=()=>enterContainer(id);
     list.append(button);
   };
+  const looseLines=objects.filter(item=>item.shape==='line' && !item.container && item.name.toLowerCase().includes(match));
+  if (looseLines.length) {
+    const heading=document.createElement('div');
+    heading.className='tree-category';
+    heading.textContent='Line / Sketch ('+looseLines.length+')';
+    list.append(heading);
+    for (const line of looseLines) row(line.id,line.name,'line');
+  }
   for (const object of objects) {
+    if (object.shape==='line' && !object.container) continue;
     const container=object.container;
     if (container) {
       if (!matchingContainers.has(container.id) && state.inside!==container.id) continue;
@@ -1427,7 +1449,8 @@ function previewMesh(object) {
   if (n>2) {
     const base=Array.from({length:n},(_,i)=>i);
     const source=state.doc?.objects.findIndex(item=>item.id===object.id);
-    const top=state.meshes[source]?.cap || [base];
+    const top=state.meshes[source]?.cap || (object.shape==='polygon'
+      ? QreaseeLine.triangulate(object.profile.points) : [base]);
     if (object.height>0) {
       vertices.push(...layer(object.z+object.height));
       faces.push(...top.map(face=>[...face].reverse()),...base.map(i=>[i,(i+1)%n,(i+1)%n+n,i+n]),
@@ -1550,6 +1573,15 @@ function drawingPoint(point,elevation) {
     label:state.snapping?'Grid '+lengthLabel(.25):''};
 }
 
+/** @param {QreaseePoint2} point @returns {QreaseeInference|null} */
+function lineTarget(point) {
+  const candidate=drawingPoint(point);
+  if (!state.linePending || !state.snapping) return candidate;
+  if (candidate && ['Ujung','Titik tengah','Pada tepi'].includes(candidate.label)) return candidate;
+  const axis=QreaseeLine.axisSnap(state.linePending.a,point,stagePoint);
+  return axis || candidate;
+}
+
 /** @param {QreaseePoint} a @param {QreaseePoint} b @param {QreaseePoint} bulge @returns {QreaseePoint[]} */
 function arcPoints(a,b,bulge) {
   const dx=b[0]-a[0],dy=b[1]-a[1],chord=Math.hypot(dx,dy);
@@ -1634,7 +1666,7 @@ canvas.addEventListener('pointerdown',event=>{
   if (tool==='line') {
     if (!state.doc || state.busy) return;
     if (state.linePending) {
-      const candidate=drawingPoint(start);
+      const candidate=lineTarget(start);
       if (!candidate) { showStatus('Arahkan kursor ke bidang untuk melanjutkan garis.');return; }
       completeLinePoint(candidate.world);
       return;
@@ -1758,7 +1790,7 @@ canvas.addEventListener('pointermove',event=>{
   if (!drag) {
     if (state.tool==='line' && state.linePending) {
       if (document.activeElement!==$('#line-length') || !state.linePending.b) {
-        const candidate=drawingPoint(point);
+        const candidate=lineTarget(point);
         state.linePending.b=candidate?.world||null;
         state.linePending.preview=candidate?[state.linePending.a,candidate.world]:[state.linePending.a];
         state.inference=candidate?.label?candidate:null;
@@ -1870,7 +1902,11 @@ canvas.addEventListener('pointermove',event=>{
       : 'Pindah · ΔX '+delta[0].toFixed(3)+'  ΔY '+delta[1].toFixed(3));
   } else {
     const a=drag.initial;
-    const candidate=drawingPoint(point,a[2]);
+    let candidate=drawingPoint(point,drag.tool==='line'?undefined:a[2]);
+    if (drag.tool==='line' && state.snapping &&
+        !['Ujung','Titik tengah','Pada tepi'].includes(candidate?.label)) {
+      candidate=QreaseeLine.axisSnap(a,point,stagePoint) || candidate;
+    }
     if (!candidate) { drag.preview=null;redraw();return; }
     state.inference=candidate.label?candidate:null;
     const b=candidate.world;
@@ -1880,7 +1916,9 @@ canvas.addEventListener('pointermove',event=>{
     drag.preview={id:drag.id,name:{line:'Garis',rectangle:'Bidang persegi',circle:'Bidang lingkaran'}[drag.tool],
       shape:drag.tool,x:circle?a[0]:(a[0]+b[0])/2,y:circle?a[1]:(a[1]+b[1])/2,z:a[2],
       width:circle?radius*2:line?x:Math.abs(x),depth:circle?radius*2:line?y:Math.abs(y),
-      height:0,rotation:0,color:'#dfcbb8'};
+      height:line?b[2]-a[2]:0,rotation:0,color:'#dfcbb8'};
+    if (line) state.cursor={mode:'model',x:round(b[0]),y:round(b[1]),z:round(b[2]),
+      line:{a:roundPoint(a),b:roundPoint(b)}};
   }
   redraw();
 });
@@ -1895,6 +1933,7 @@ canvas.addEventListener('dblclick',event=>{
 canvas.addEventListener('pointerup',()=>{
   const drag=state.drag;
   state.drag=null;
+  if (state.cursor) delete state.cursor.line;
   if (state.linePress && !drag) {
     const initial=state.linePress.initial;
     state.linePress=null;
@@ -1909,7 +1948,7 @@ canvas.addEventListener('pointerup',()=>{
     addLineChain(drag.contour,true,'Kontur offset');
   } else if (drag?.preview) {
     const object=drag.preview;
-    const valid=object.shape==='line' ? Math.hypot(object.width,object.depth)>.001
+    const valid=object.shape==='line' ? Math.hypot(object.width,object.depth,object.height)>.001
       : object.width>.001 && object.depth>.001;
     if (valid) addObject(object);
   } else if (drag?.updates && drag.updates.some((object,i)=>JSON.stringify(object)!==JSON.stringify(drag.sources[i]))) {
@@ -2093,5 +2132,10 @@ $('#sheet').addEventListener('pointermove',event=>{
 $('#sheet').addEventListener('pointerleave',()=>{if (state.layout) state.cursor=null;});
 
 window.addEventListener('hashchange',()=>openRoom());
-setInterval(sync,window.qreaseeCloudPost?1500:350);
+let lastSync=0;
+setInterval(()=>{
+  const fast=state.linePending || state.peers.some(peer=>peer.cursor?.line);
+  const interval=window.qreaseeCloudPost ? (fast?500:1500) : 350;
+  if (Date.now()-lastSync>=interval) { lastSync=Date.now(); sync(); }
+},250);
 openRoom();

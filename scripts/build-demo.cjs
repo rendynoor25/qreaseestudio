@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
+require('./build-line.cjs');
 const output = path.join(root, 'dist');
 const cloud = process.env.QREASEE_CLOUD_DEMO === '1';
 const auth = process.env.QREASEE_AUTH_DEMO === '1';
@@ -17,6 +18,7 @@ if (fs.existsSync(envFile)) {
 fs.mkdirSync(output, { recursive: true });
 const html = fs.readFileSync(path.join(root, 'web', 'index.html'), 'utf8')
   .replace('href="/studio.css"', 'href="./studio.css"')
+  .replace('src="/line-geometry.js"', 'src="./line-geometry.js"')
   .replace('</head>', (auth ? '  <link rel="stylesheet" href="./auth.css">\n' : '') + '</head>')
   .replace('<body>', '<body>' + (auth ? '\n  <div id="auth-gate" role="dialog" aria-modal="true" aria-labelledby="auth-title">\n    <div class="auth-card">\n      <h1 id="auth-title">Masuk ke Qreasee</h1>\n      <p>Gunakan akun Google untuk membuka dan mengedit proyek bersama.</p>\n      <button id="google-login" disabled>Masuk dengan Google</button>\n      <p id="auth-message" role="status">Memeriksa sesi…</p>\n    </div>\n  </div>' : ''))
   .replace('<script src="/studio.js" defer></script>',
@@ -26,7 +28,7 @@ const html = fs.readFileSync(path.join(root, 'web', 'index.html'), 'utf8')
       '<script src="./cloud.js" defer></script>\n  ' : '') +
     '<script src="./studio.js" defer></script>');
 fs.writeFileSync(path.join(output, 'index.html'), html);
-for (const name of ['studio.css', 'studio.js', 'qreasee-logo.png', 'qreasee-logo-black.png']) {
+for (const name of ['studio.css', 'studio.js', 'line-geometry.js', 'qreasee-logo.png', 'qreasee-logo-black.png']) {
   fs.copyFileSync(path.join(root, 'web', name), path.join(output, name));
 }
 fs.copyFileSync(path.join(root, 'demo', 'demo.js'), path.join(output, 'demo.js'));

@@ -125,6 +125,8 @@ interface QreaseeLinePending {
   preview: QreaseePoint[];
 }
 
+declare const QreaseeLine: typeof import('./line-geometry');
+
 interface QreaseeInference {
   world: QreaseePoint;
   label: string;

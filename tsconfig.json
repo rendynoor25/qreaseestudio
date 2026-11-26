@@ -14,6 +14,6 @@
     "forceConsistentCasingInFileNames": true,
     "types": []
   },
-  "include": ["web/**/*.js", "web/**/*.d.ts"],
+  "include": ["web/**/*.js", "web/**/*.ts"],
   "exclude": ["node_modules", "dist", "target", "data", "data-lan-demo"]
 }

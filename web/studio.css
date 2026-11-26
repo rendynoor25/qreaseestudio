@@ -58,6 +58,7 @@ summary::-webkit-details-marker{display:none}
 #object-count{margin-left:auto;color:var(--muted);font-size:11px;background:var(--control);padding:0 6px;border-radius:4px}
 #model-tree{display:flex;flex-direction:column;min-height:0;flex:1}
 #objects{overflow:auto;scrollbar-width:thin;scrollbar-color:#333b47 transparent;padding:0 8px 9px}
+.tree-category{padding:9px 9px 5px;color:var(--brand);font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
 .tree-row{width:100%;min-height:30px;justify-content:flex-start;padding:0 9px 0 17px;gap:9px;color:#c7cdd6;text-align:left}
 .tree-row span:last-child{overflow:hidden;text-overflow:ellipsis}
 .tree-row svg{width:14px;height:14px;color:#778394}

@@ -21,6 +21,7 @@ const CONNECTION_LIMIT: usize = 64;
 const HTML: &str = include_str!("../web/index.html");
 const CSS: &str = include_str!("../web/studio.css");
 const JS: &str = include_str!("../web/studio.js");
+const LINE_GEOMETRY: &str = include_str!("../web/line-geometry.js");
 const LOGO: &[u8] = include_bytes!("../web/qreasee-logo.png");
 const LOGO_BLACK: &[u8] = include_bytes!("../web/qreasee-logo-black.png");
 
@@ -203,6 +204,12 @@ fn serve(mut stream: TcpStream, studio: &Studio) -> io::Result<()> {
             "200 OK",
             "text/javascript; charset=utf-8",
             JS.as_bytes(),
+        ),
+        ("GET", "/line-geometry.js") => respond(
+            &mut stream,
+            "200 OK",
+            "text/javascript; charset=utf-8",
+            LINE_GEOMETRY.as_bytes(),
         ),
         ("GET", "/qreasee-logo.png") => respond(
             &mut stream,
