@@ -65,6 +65,8 @@ pub struct Object {
     pub color: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material_scale: Option<f64>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -116,7 +118,10 @@ impl Object {
             && self.color.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit)
             && self.material.as_ref().is_none_or(|material| matches!(material.as_str(),
                 "brick" | "hebel" | "timber" | "zinc" | "clay_tile" | "concrete_tile" |
-                "glass" | "grass" | "sand" | "asphalt" | "metal" | "paint"))
+                "glass" | "grass" | "sand" | "asphalt" | "metal" | "paint") ||
+                material.starts_with("custom:") && material.len() <= 64)
+            && self.material_scale.is_none_or(|scale| scale.is_finite()
+                && (1.0..=1000.0).contains(&scale))
             && [self.x, self.y, self.z, self.rotation]
                 .into_iter()
                 .all(bounded)
@@ -1089,6 +1094,7 @@ pub fn demo() -> Document {
             rotation: 0.0,
             color: color.into(),
             material: None,
+            material_scale: None,
             hidden: false,
             container: None,
             profile: None,
@@ -1525,7 +1531,13 @@ mod tests {
         assert!(object.valid());
         object.material = Some("bamboo".into());
         assert!(!object.valid());
+        object.material = Some("custom:3f1d20d8-1111-4111-8111-111111111111".into());
+        object.material_scale = Some(20.0);
+        assert!(object.valid());
+        object.material_scale = Some(0.0);
+        assert!(!object.valid());
         object.material = None;
+        object.material_scale = None;
         assert!(object.valid());
     }
 

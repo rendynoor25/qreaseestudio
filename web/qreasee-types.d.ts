@@ -6,7 +6,8 @@ type QreaseePoint2 = [number, number];
 type QreaseeView = 'perspective' | 'iso' | 'plan' | 'front' | 'right';
 type QreaseeShape = 'line' | 'rectangle' | 'circle' | 'polygon' | 'mesh';
 type QreaseeMaterial = 'brick' | 'hebel' | 'timber' | 'zinc' | 'clay_tile' |
-  'concrete_tile' | 'glass' | 'grass' | 'sand' | 'asphalt' | 'metal' | 'paint';
+  'concrete_tile' | 'glass' | 'grass' | 'sand' | 'asphalt' | 'metal' | 'paint' |
+  `custom:${string}`;
 type QreaseeTool =
   | 'select' | 'line' | 'arc' | 'offset' | 'rectangle' | 'circle'
   | 'pull' | 'move' | 'rotate' | 'scale' | 'erase' | 'measure'
@@ -37,6 +38,7 @@ interface QreaseeObject {
   rotation: number;
   color: string;
   material?: QreaseeMaterial | null;
+  material_scale?: number | null;
   hidden?: boolean;
   container?: QreaseeMembership | null;
   profile?: QreaseeProfile | null;
