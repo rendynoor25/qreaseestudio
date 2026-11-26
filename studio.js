@@ -93,7 +93,7 @@ const state = {
   doc: null, meshes: [], plans: [], selected: new Set(), inside: null, tool: 'select', layout: false, busy: false,
   snapping: true, inference: null,
   undo: [], redo: [], drag: null, arcPending:null, linePending:null, linePress:null, drawPending:null,
-  movePending:null, rotatePending:null, offsetPending:null, measurePending:null, sectionPending:null, sectionHover:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null, canManageShare:true, shareRole:'edit', showHidden:false
+  movePending:null, rotatePending:null, offsetPending:null, offsetHover:null, measurePending:null, sectionPending:null, sectionHover:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null, canManageShare:true, shareRole:'edit', showHidden:false
 };
 const canvas = $('#viewport');
 const ctx = canvas.getContext('2d');
@@ -246,6 +246,7 @@ function setTool(tool) {
     state.movePending=null;
     state.rotatePending=null;
     state.offsetPending=null;
+    state.offsetHover=null;
     state.measurePending=null;
     state.sectionPending=null;
     state.sectionHover=null;
@@ -708,6 +709,7 @@ async function openRoom(createBlank) {
   state.movePending = null;
   state.rotatePending = null;
   state.offsetPending = null;
+  state.offsetHover = null;
   state.measurePending = null;
   state.sectionPending = null;
   state.sectionHover = null;
@@ -4043,6 +4045,11 @@ function draw() {
       }
       if (!face.smooth && !face.quiet) ctx.stroke();
     }
+    if (state.tool==='offset'&&state.offsetHover?.edge) {
+      const [a,b]=state.offsetHover.edge;
+      strokeLine(a,b,'#3a444e',5);
+      strokeLine(a,b,'#ffffff',2.5);
+    }
     drawSectionPlanes();
     drawModelGrids();
   } else state.hits = [];
@@ -5140,6 +5147,30 @@ canvas.addEventListener('pointermove',event=>{
       redraw();
       return;
     }
+    if (state.tool==='offset' && !state.offsetPending) {
+      const host=offsetHostAt(point);
+      if (host) {
+        const outline=previewMesh({...host,height:0}).vertices;
+        const projected=outline.map(stagePoint);
+        let edge=null,bestDistance=Infinity;
+        for (let index=0;index<projected.length;index++) {
+          const next=(index+1)%projected.length;
+          if (!Number.isFinite(projected[index][0])||!Number.isFinite(projected[next][0])) continue;
+          const distance=pointToPolygonEdge(point,[projected[index],projected[next]]);
+          if (distance<bestDistance) {
+            bestDistance=distance;
+            edge=[projected[index],projected[next]];
+          }
+        }
+        state.offsetHover={host,outline,edge:bestDistance<=30?edge:null};
+        state.inference=infer(point,undefined,new Set(),world=>onFaceBoundary(world,outline));
+      } else {
+        state.offsetHover=null;
+        state.inference=null;
+      }
+      redraw();
+      return;
+    }
     if (state.drawPending) {
       const pending=state.drawPending;
       pending.hover=point;
@@ -5307,7 +5338,7 @@ canvas.addEventListener('pointermove',event=>{
   }
   redraw();
 });
-canvas.addEventListener('pointerleave',()=>{if (!state.layout) state.cursor=null;state.hoverKey=null;state.sectionHover=null;hoverGridId=null;state.inference=null;redraw();});
+canvas.addEventListener('pointerleave',()=>{if (!state.layout) state.cursor=null;state.hoverKey=null;state.sectionHover=null;state.offsetHover=null;hoverGridId=null;state.inference=null;redraw();});
 canvas.addEventListener('dblclick',event=>{
   if (state.tool==='line' && state.linePending) { finishLine(); return; }
   if (!['select','bucket'].includes(state.tool)) return;
