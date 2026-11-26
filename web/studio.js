@@ -1663,35 +1663,44 @@ function drawSectionNormalArrow(worldOrigin,normal,color,alpha,shaft=30,offset=6
 }
 
 function drawSectionPlanes() {
+  const hover=state.sectionHover&&!state.sectionPending
+    ? {id:'__hover__',name:'Pratinjau',symbol:'§',origin:state.sectionHover.origin,
+      normal:state.sectionHover.normal,enabled:true,hidden:false}
+    : null;
   const list=[...activeSections(),
-    ...(state.showHidden?sectionPlanes().filter(section=>section.hidden):[])];
+    ...(state.showHidden?sectionPlanes().filter(section=>section.hidden):[]),
+    ...(hover?[hover]:[])];
   sectionQuads=[];
-  if (state.sectionHover && !state.sectionPending)
-    drawSectionNormalArrow(state.sectionHover.origin,state.sectionHover.normal,'#e8932a',.9,44,10);
   if (!list.length) return;
   ctx.save();
   ctx.setLineDash([7,5]);
   ctx.lineWidth=1.5;
   for (const section of list) {
+    const ghost=section.id==='__hover__';
+    if (ghost) {ctx.save();ctx.globalAlpha=.72;}
     const worldQuad=sectionQuad(section);
     const quad=worldQuad.map(stagePoint);
-    if (quad.some(point=>!Number.isFinite(point[0]))) continue;
-    ctx.strokeStyle=section.id==='__preview__'?'#e8a24d':
+    if (quad.some(point=>!Number.isFinite(point[0]))) {
+      if (ghost) ctx.restore();
+      continue;
+    }
+    ctx.strokeStyle=section.id==='__preview__'||ghost?'#e8a24d':
       section.hidden?'#e8932a':
       activeSectionId===section.id?'#e27f22':'#c98a42';
     polygon(quad);
     ctx.stroke();
     ctx.setLineDash([]);
     for (const point of quad) {
-      ctx.beginPath();ctx.arc(point[0],point[1],5,0,Math.PI*2);
+      ctx.beginPath();ctx.arc(point[0],point[1],ghost?4:5,0,Math.PI*2);
       ctx.fillStyle='#fffaf2';ctx.fill();
       ctx.strokeStyle='#d6842a';ctx.lineWidth=1.7;ctx.stroke();
     }
-    const alpha=section.id==='__preview__'?.9:activeSectionId===section.id?1:.62;
+    const alpha=ghost?.95:section.id==='__preview__'?.9:activeSectionId===section.id?1:.62;
     for (const corner of worldQuad)
-      drawSectionNormalArrow(corner,section.normal,'#e8932a',alpha,28,6);
-    if (section.id!=='__preview__')
+      drawSectionNormalArrow(corner,section.normal,'#e8932a',alpha,ghost?32:28,6);
+    if (section.id!=='__preview__'&&!ghost)
       sectionQuads.push({id:section.id,quad:quad.map(point=>[point[0],point[1]]),section});
+    if (ghost) ctx.restore();
     ctx.setLineDash([7,5]);
   }
   ctx.restore();
