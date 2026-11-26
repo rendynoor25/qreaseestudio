@@ -660,20 +660,20 @@ async function commit(edit, success) {
   }
 }
 
-function edit(before, after, type = 'object') {
+function edit(before, after, type = 'object', select = true) {
   if (type === 'object' && before?.container?.definition) {
     const linked = linkedMembers(before);
     const updates = after ? linked.map(item=>({
       ...after, id:item.id, container:item.container,
       x:item.x+(after.x-before.x), y:item.y+(after.y-before.y), z:item.z+(after.z-before.z)
     })) : [];
-    return batch(linked.map(item=>item.id===before.id?before:item), updates, after ? [after.id] : []);
+    return batch(linked.map(item=>item.id===before.id?before:item), updates, after && select ? [after.id] : []);
   }
   const command = {type,before,after};
   return commit(command, topology => {
     state.undo.push(historyCommand(command,topology));
     state.redo.length = 0;
-    if (type === 'object') state.selected = new Set(after ? [targetId(after)] : []);
+    if (type === 'object') state.selected = new Set(select && after ? [targetId(after)] : []);
   });
 }
 
@@ -929,9 +929,9 @@ $('#duplicate').onclick = () => {
     x:object.x+.5,y:object.y+.5});
 };
 
-function addObject(object) {
+function addObject(object, select = true) {
   const anchor=members(state.inside)[0];
-  if (!anchor) return edit(null,object);
+  if (!anchor) return edit(null,object,'object',select);
   const container=anchor.container;
   const copies=container.definition ? linkedMembers(anchor) : [anchor];
   const slot=container.definition ? identity() : null;
@@ -939,7 +939,7 @@ function addObject(object) {
     ...object,id:copy.id===anchor.id ? object.id : identity(),
     container:{...copy.container,slot},
     x:object.x+(copy.x-anchor.x),y:object.y+(copy.y-anchor.y),z:object.z+(copy.z-anchor.z)
-  })),[object.id]);
+  })),select?[object.id]:[]);
 }
 
 async function addLineObject(object) {
@@ -1045,10 +1045,10 @@ function shellFromObject(source,extruded) {
 
 function insertRectangle(object,host) {
   if (!host || targetId(host)!==host.id || state.inside !== (host.container?.id??null))
-    return addObject(object);
+    return addObject(object,false);
   if (host.height===0 && !host.solid_id) {
     const pair=QreaseeLine.splitRectanglePair(host,object);
-    if (!pair) return addObject(object);
+    if (!pair) return addObject(object,false);
     const container=host.container??object.container??null;
     const hostPieces=pair.host.map((geometry,index)=>({...host,...geometry,
       id:index===0?host.id:identity(),name:index===0?host.name:'Bidang tepi'}));
@@ -1056,25 +1056,25 @@ function insertRectangle(object,host) {
       id:identity(),name:index===0?object.name:'Bidang tepi'}));
     const intersection={...object,...pair.intersection,container,id:object.id,
       name:pair.child.length?'Bidang potong':object.name};
-    return batch([host],[...hostPieces,...childPieces,intersection],[intersection.id]);
+    return batch([host],[...hostPieces,...childPieces,intersection],[]);
   }
   let surface=host,others=[];
   if (host.height>0) {
     const shell=shellFromObject(host,host);
-    if (!shell) return addObject(object);
+    if (!shell) return addObject(object,false);
     surface=shell.top;
     others=shell.pieces.filter(part=>part.id!==surface.id);
   }
-  if (surface.height!==0) return addObject(object);
+  if (surface.height!==0) return addObject(object,false);
   const strips=QreaseeLine.splitRectangle(surface,object);
-  if (!strips) return addObject(object);
+  if (!strips) return addObject(object,false);
   const pieces=strips.map((geometry,index)=>({...surface,...geometry,
     id:index===0?surface.id:identity(),name:index===0?surface.name:'Bidang tepi',
     ...(surface.profile?{profile:null}:{})}));
   const inner={...object,container:surface.container??null,
     ...(surface.solid_id?{solid_id:surface.solid_id,surface_role:surface.surface_role,
       opening_id:identity(),opening_origin:[object.x,object.y,object.z]}:{})};
-  return batch([host],[...others,...pieces,inner],[inner.id]);
+  return batch([host],[...others,...pieces,inner],[]);
 }
 
 function openingProjection(face,bottom) {
@@ -2423,7 +2423,7 @@ canvas.addEventListener('pointerdown',event=>{
     state.drawPending=null;
     $('#line-length').value='';
     if (tool==='rectangle') insertRectangle(object,pending.host);
-    else addObject(object);
+    else addObject(object,false);
     redraw();
     return;
   }
@@ -2785,7 +2785,7 @@ canvas.addEventListener('pointerup',()=>{
     if (valid) {
       if (drag.tool==='rectangle') insertRectangle(object,drag.host);
       else if (drag.tool==='line') addLineObject(object);
-      else addObject(object);
+      else addObject(object,false);
       $('#line-length').value='';
     }
   } else if (drag?.updates && drag.updates.some((object,i)=>JSON.stringify(object)!==JSON.stringify(drag.sources[i]))) {
