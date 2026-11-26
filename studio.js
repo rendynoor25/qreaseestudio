@@ -857,6 +857,9 @@ async function commit(edit, success) {
   const epoch = state.epoch;
   state.busy = true;
   refreshButtons();
+  const slowSave=setTimeout(()=>{
+    if (state.epoch===epoch && state.busy) showStatus('Menyimpan perubahan…');
+  },220);
   const rollback=previewRemoval(edit);
   try {
     const result = await exchange(edit);
@@ -880,6 +883,7 @@ async function commit(edit, success) {
     }
     return false;
   } finally {
+    clearTimeout(slowSave);
     if (state.epoch === epoch) {
       state.busy = false;
       refreshButtons();
@@ -5040,6 +5044,8 @@ canvas.addEventListener('pointerdown',event=>{
       const origin=ground(start,elevation);
       select(id);
       state.drag={tool,start,object,sources,owned,elevation,origin,anchor:[...(origin||[0,0]),elevation]};
+      showStatus('Tarik permukaan sepanjang normal, atau ketik jarak lalu Enter.');
+      redraw();
     } else if (tool==='arc' && state.inside) {
       showStatus('Keluar dari Edit isi sebelum menggambar busur.');return;
     } else if (tool==='arc') {
