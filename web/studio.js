@@ -1011,10 +1011,23 @@ function moveSources() {
   return [...targets.values()];
 }
 
-function movePreview(sources,start,destination) {
+function movePreview(sources,start,destination,supportZ=null,baseZ=null) {
   if (!destination) return null;
-  const dx=destination[0]-start[0],dy=destination[1]-start[1],dz=destination[2]-start[2];
+  const dx=destination[0]-start[0],dy=destination[1]-start[1],
+    dz=supportZ===null?destination[2]-start[2]:supportZ-baseZ;
   return sources.map(object=>({...object,x:object.x+dx,y:object.y+dy,z:object.z+dz}));
+}
+
+function moveBaseZ(sources) {
+  return Math.min(...sources.flatMap(object=>previewMesh(object).vertices.map(point=>point[2])));
+}
+
+function moveSupportZ(point,pending) {
+  if (pending.axis==='z') return null;
+  const face=state.hits.findLast(candidate=>!pending.excluded.has(candidate.object.id) &&
+    candidate.world.length>=3 && contains(point,candidate.points) &&
+    candidate.world.every(vertex=>Math.abs(vertex[2]-candidate.world[0][2])<1e-5));
+  return face?.world[0][2]??null;
 }
 
 /**
@@ -2943,17 +2956,22 @@ canvas.addEventListener('pointerdown',event=>{
         const pending=state.movePending;
         const destination=moveDestination(start,pending);
         if (!destination) {showStatus('Arahkan klik tujuan pada bidang yang terlihat.');return;}
-        const dx=destination.world[0]-pending.start[0],dy=destination.world[1]-pending.start[1],
-          dz=destination.world[2]-pending.start[2];
+        const supportZ=event.altKey?moveSupportZ(start,pending):null;
+        if (event.altKey && supportZ===null) {
+          showStatus('Alt + klik memerlukan bidang horizontal yang terlihat.');return;
+        }
+        const updates=movePreview(pending.sources,pending.start,destination.world,supportZ,pending.baseZ);
+        const dx=updates[0].x-pending.sources[0].x,dy=updates[0].y-pending.sources[0].y,
+          dz=updates[0].z-pending.sources[0].z;
         if (Math.hypot(dx,dy,dz)<.001) {showStatus('Titik tujuan masih sama dengan titik awal.');return;}
-        const updates=movePreview(pending.sources,pending.start,destination.world);
         const selection=[...state.selected];
         const lifted=Math.abs(dz)>=.001;
         state.movePending=null;
         state.inference=null;
         batch(pending.sources,updates,selection).then(moved=>{
           if (moved) showStatus(pending.sources.length+' objek dipindahkan'+
-            (lifted?' (ΔZ '+lengthLabel(dz)+').':'.'));
+            (supportZ!==null?' · dasar pada Z '+lengthLabel(supportZ):
+              lifted?' (ΔZ '+lengthLabel(dz)+').':'.'));
         });
         redraw();
         return;
@@ -2962,11 +2980,11 @@ canvas.addEventListener('pointerdown',event=>{
       if (!sources.length) {showStatus('Pilih objek terlebih dahulu, lalu tentukan titik awal.');return;}
       const hit=infer(start,undefined) || drawingPoint(start);
       if (!hit) {showStatus('Tentukan titik awal pada bidang yang terlihat.');return;}
-      state.movePending={start:hit.world,z:hit.world[2],sources,axis:null,pointer:start,
+      state.movePending={start:hit.world,z:hit.world[2],sources,baseZ:moveBaseZ(sources),axis:null,pointer:start,
         excluded:new Set(sources.map(object=>object.id)),destination:null,updates:null};
       state.inference=hit.label?hit:null;
       showStatus('Klik titik tujuan untuk memindahkan '+sources.length+
-        ' objek; tekan panah Atas/Bawah untuk mengunci sumbu Z.');
+        ' objek. Alt + klik pada lantai untuk menumpukan dasar objek; panah Atas/Bawah mengunci Z.');
       redraw();
       return;
     }
@@ -3102,12 +3120,16 @@ canvas.addEventListener('pointermove',event=>{
       const pending=state.movePending;
       pending.pointer=point;
       const destination=moveDestination(point,pending);
+      const supportZ=event.altKey?moveSupportZ(point,pending):null;
       pending.destination=destination?.world||null;
-      pending.updates=destination?movePreview(pending.sources,pending.start,destination.world):null;
+      pending.updates=destination?movePreview(pending.sources,pending.start,destination.world,
+        supportZ,pending.baseZ):null;
       state.inference=destination?.label?destination:null;
       if (destination) {
-        const dz=destination.world[2]-pending.start[2];
-        showStatus(pending.axis==='z'
+        const dz=pending.updates[0].z-pending.sources[0].z;
+        showStatus(supportZ!==null
+          ? 'Dasar objek pada bidang Z '+lengthLabel(supportZ)+' · Alt + klik untuk menetapkan'
+          : pending.axis==='z'
           ? 'Sumbu Z terkunci · ΔZ '+lengthLabel(dz)+' · klik kedua untuk menetapkan'
           : 'Pindah · ΔZ '+lengthLabel(dz)+(destination.label?' · '+destination.label:''));
       } else if (pending.axis==='z') {
