@@ -490,6 +490,12 @@ pub struct SheetGridLine {
     pub a: [f64; 2],
     pub b: [f64; 2],
     pub name: String,
+    #[serde(default, rename = "worldA", skip_serializing_if = "Option::is_none")]
+    pub world_a: Option<[f64; 2]>,
+    #[serde(default, rename = "worldB", skip_serializing_if = "Option::is_none")]
+    pub world_b: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -534,18 +540,25 @@ impl SheetLayout {
             })
             && self.grid_lines.iter().all(|item| {
                 !item.id.is_empty() && !item.name.trim().is_empty() && item.name.chars().count() <= 12
-                    && self.views.iter().any(|view| view.id == item.view_id && view.mode != "iso"
+                    && (self.views.iter().any(|view| view.id == item.view_id && view.mode != "iso"
                         && item.a[0] >= 0.0 && item.a[0] <= view.w && item.b[0] >= 0.0 && item.b[0] <= view.w
                         && item.a[1] >= 0.0 && item.a[1] <= view.h && item.b[1] >= 0.0 && item.b[1] <= view.h)
+                        || item.world_a.is_some() && item.world_b.is_some())
                     && item.a.into_iter().chain(item.b).all(f64::is_finite)
                     && (item.a[0] - item.b[0]).hypot(item.a[1] - item.b[1]) >= 2.0
+                    && match (item.world_a,item.world_b) {
+                        (None,None) => true,
+                        (Some(a),Some(b)) => a.into_iter().chain(b).all(|v| v.is_finite() && v.abs()<=10_000.0)
+                            && (a[0]-b[0]).hypot(a[1]-b[1])>=0.001,
+                        _ => false,
+                    }
             })
             && self.dimensions.iter().all(|item| {
                 !item.id.is_empty() && self.views.iter().any(|view| view.id == item.view_id && view.mode != "iso")
                     && item.a.into_iter().chain(item.b).all(|v| v.is_finite() && v >= 0.0 && v <= 420.0)
                     && match (&item.grid_a, &item.grid_b) {
                         (None, None) => true,
-                        (Some(a), Some(b)) => a != b && [a,b].iter().all(|id| self.grid_lines.iter().any(|grid| grid.id == **id && grid.view_id == item.view_id)),
+                        (Some(a), Some(b)) => a != b && [a,b].iter().all(|id| self.grid_lines.iter().any(|grid| grid.id == **id && (grid.view_id == item.view_id || grid.world_a.is_some() && grid.world_b.is_some()))),
                         _ => false,
                     }
             })
@@ -1227,8 +1240,8 @@ mod tests {
                 size: 4.0, view_id: Some("plan".into()),
             }],
             grid_lines: vec![
-                SheetGridLine { id: "a".into(), view_id: "plan".into(), a: [10.0, 10.0], b: [10.0, 90.0], name: "A".into() },
-                SheetGridLine { id: "b".into(), view_id: "plan".into(), a: [40.0, 10.0], b: [40.0, 90.0], name: "B".into() },
+                SheetGridLine { id: "a".into(), view_id: "plan".into(), a: [10.0, 10.0], b: [10.0, 90.0], name: "A".into(), world_a: Some([0.0,0.0]), world_b: Some([0.0,10.0]), hidden: false },
+                SheetGridLine { id: "b".into(), view_id: "plan".into(), a: [40.0, 10.0], b: [40.0, 90.0], name: "B".into(), world_a: Some([3.0,0.0]), world_b: Some([3.0,10.0]), hidden: false },
             ],
             dimensions: vec![SheetDimension {
                 id: "ab".into(), view_id: "plan".into(), a: [10.0, 10.0], b: [40.0, 10.0],
@@ -1238,7 +1251,13 @@ mod tests {
         assert!(sheet.valid());
         let restored: Sheet = serde_json::from_value(serde_json::to_value(&sheet).unwrap()).unwrap();
         assert_eq!(restored, sheet);
+        sheet.layout.as_mut().unwrap().grid_lines[0].hidden = true;
+        assert!(sheet.valid());
+        let hidden: Sheet = serde_json::from_value(serde_json::to_value(&sheet).unwrap()).unwrap();
+        assert!(hidden.layout.unwrap().grid_lines[0].hidden);
         sheet.layout.as_mut().unwrap().grid_lines[1].view_id = "missing".into();
+        assert!(sheet.valid()); // World-space datum survives deletion of its source view.
+        sheet.layout.as_mut().unwrap().grid_lines[1].world_b = None;
         assert!(!sheet.valid());
     }
 

@@ -66,7 +66,7 @@ interface QreaseeSheet {
   layout?: {
     views: Array<{id:string; mode:'plan'|'front'|'right'|'iso'; x:number; y:number; w:number; h:number; title:string; grid?:boolean}>;
     texts: Array<{id:string; x:number; y:number; text:string; size:number; viewId?:string}>;
-    gridLines?: Array<{id:string; viewId:string; a:QreaseePoint2; b:QreaseePoint2; name:string}>;
+    gridLines?: Array<{id:string; viewId:string; a:QreaseePoint2; b:QreaseePoint2; name:string; worldA?:QreaseePoint2; worldB?:QreaseePoint2; hidden?:boolean}>;
     dimensions: Array<{id:string; viewId:string; a:QreaseePoint2; b:QreaseePoint2; gridA?:string; gridB?:string}>;
   };
 }
