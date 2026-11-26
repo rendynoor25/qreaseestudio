@@ -124,6 +124,7 @@ interface QreaseeLinePending {
   a: QreaseePoint;
   b: QreaseePoint | null;
   preview: QreaseePoint[];
+  raw?: QreaseePoint | null;
 }
 
 declare const QreaseeLine: typeof import('./line-geometry');
@@ -178,6 +179,7 @@ interface QreaseeState {
   arcPending: any;
   linePending: QreaseeLinePending | null;
   linePress: any;
+  drawPending: any;
   hits: QreaseeHit[];
   epoch: number;
   polling: boolean;

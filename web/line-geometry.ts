@@ -27,6 +27,44 @@ export function verticalRectangle(a: Point, b: Point, axis: XY): {
     wall_axis: axis };
 }
 
+export function measuredEndpoint(a: Point, b: Point, length: number): Point | null {
+  const delta = b.map((value, i) => value - a[i]);
+  const distance = Math.hypot(...delta);
+  if (distance < 1e-9 || !Number.isFinite(length) || length <= 0) return null;
+  return a.map((value, i) => value + delta[i] * length / distance) as Point;
+}
+
+export function measuredRectangle(a: Point, b: Point, x: number, y: number, wallAxis?: XY): {
+  x: number; y: number; z: number; width: number; depth: number; wall_axis?: XY;
+} | null {
+  if (!(x > 0 && y > 0)) return null;
+  if (wallAxis) {
+    const along = (b[0] - a[0]) * wallAxis[0] + (b[1] - a[1]) * wallAxis[1];
+    const vertical = b[2] - a[2];
+    if (Math.abs(along) < 1e-9 || Math.abs(vertical) < 1e-9) return null;
+    return { x: a[0] + Math.sign(along) * x * wallAxis[0] / 2,
+      y: a[1] + Math.sign(along) * x * wallAxis[1] / 2,
+      z: a[2] + Math.sign(vertical) * y / 2,
+      width: x, depth: y, wall_axis: wallAxis };
+  }
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  if (Math.abs(dx) < 1e-9 || Math.abs(dy) < 1e-9) return null;
+  return { x: a[0] + Math.sign(dx) * x / 2,
+    y: a[1] + Math.sign(dy) * y / 2, z: a[2], width: x, depth: y };
+}
+
+export function radiusArc(center: Point, direction: Point, radius: number, angleDegrees = 90): Point[] {
+  const dx = direction[0] - center[0], dy = direction[1] - center[1];
+  const length = Math.hypot(dx, dy);
+  if (length < 1e-9 || !(radius > 0) || !(Math.abs(angleDegrees) > 0 && Math.abs(angleDegrees) <= 360)) return [];
+  const start = Math.atan2(dy, dx), sweep = angleDegrees * Math.PI / 180;
+  const count = Math.max(8, Math.ceil(Math.abs(sweep) * 16));
+  return Array.from({ length: count + 1 }, (_, i) => {
+    const angle = start + sweep * i / count;
+    return [center[0] + radius * Math.cos(angle), center[1] + radius * Math.sin(angle), center[2]];
+  });
+}
+
 export interface LineObject {
   shape: string;
   x: number;

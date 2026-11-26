@@ -25,7 +25,10 @@ var QreaseeLine = (() => {
     closedLoop: () => closedLoop,
     connectedFaces: () => connectedFaces,
     connectedLines: () => connectedLines,
+    measuredEndpoint: () => measuredEndpoint,
+    measuredRectangle: () => measuredRectangle,
     polygonFromLoop: () => polygonFromLoop,
+    radiusArc: () => radiusArc,
     triangulate: () => triangulate,
     verticalRectangle: () => verticalRectangle,
     verticalWall: () => verticalWall
@@ -59,6 +62,48 @@ var QreaseeLine = (() => {
       depth: Math.abs(b[2] - a[2]),
       wall_axis: axis
     };
+  }
+  function measuredEndpoint(a, b, length) {
+    const delta = b.map((value, i) => value - a[i]);
+    const distance = Math.hypot(...delta);
+    if (distance < 1e-9 || !Number.isFinite(length) || length <= 0) return null;
+    return a.map((value, i) => value + delta[i] * length / distance);
+  }
+  function measuredRectangle(a, b, x, y, wallAxis) {
+    if (!(x > 0 && y > 0)) return null;
+    if (wallAxis) {
+      const along = (b[0] - a[0]) * wallAxis[0] + (b[1] - a[1]) * wallAxis[1];
+      const vertical = b[2] - a[2];
+      if (Math.abs(along) < 1e-9 || Math.abs(vertical) < 1e-9) return null;
+      return {
+        x: a[0] + Math.sign(along) * x * wallAxis[0] / 2,
+        y: a[1] + Math.sign(along) * x * wallAxis[1] / 2,
+        z: a[2] + Math.sign(vertical) * y / 2,
+        width: x,
+        depth: y,
+        wall_axis: wallAxis
+      };
+    }
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    if (Math.abs(dx) < 1e-9 || Math.abs(dy) < 1e-9) return null;
+    return {
+      x: a[0] + Math.sign(dx) * x / 2,
+      y: a[1] + Math.sign(dy) * y / 2,
+      z: a[2],
+      width: x,
+      depth: y
+    };
+  }
+  function radiusArc(center, direction, radius, angleDegrees = 90) {
+    const dx = direction[0] - center[0], dy = direction[1] - center[1];
+    const length = Math.hypot(dx, dy);
+    if (length < 1e-9 || !(radius > 0) || !(Math.abs(angleDegrees) > 0 && Math.abs(angleDegrees) <= 360)) return [];
+    const start = Math.atan2(dy, dx), sweep = angleDegrees * Math.PI / 180;
+    const count = Math.max(8, Math.ceil(Math.abs(sweep) * 16));
+    return Array.from({ length: count + 1 }, (_, i) => {
+      const angle = start + sweep * i / count;
+      return [center[0] + radius * Math.cos(angle), center[1] + radius * Math.sin(angle), center[2]];
+    });
   }
   var precision = 1e5;
   var key = (point) => point.slice(0, 2).map((value) => Math.round(value * precision)).join(":");
