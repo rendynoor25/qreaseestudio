@@ -94,18 +94,18 @@ function createSurfacePattern(size, paint) {
   if (surface) paint(surface);
   return ctx.createPattern(tile,'repeat') || 'transparent';
 }
-const selectionPattern = createSurfacePattern(6, surface => {
-  surface.fillStyle = '#b86622';
+const selectionPattern = createSurfacePattern(7, surface => {
+  surface.fillStyle = '#b86622cc';
   surface.beginPath();
-  surface.arc(3,3,.9,0,Math.PI*2);
+  surface.arc(3.5,3.5,.75,0,Math.PI*2);
   surface.fill();
 });
-const hoverPattern = createSurfacePattern(10, surface => {
-  surface.strokeStyle = '#c8793699';
-  surface.lineWidth = 1;
+const hoverPattern = createSurfacePattern(9, surface => {
+  surface.strokeStyle = '#c8793688';
+  surface.lineWidth = .7;
   surface.beginPath();
-  surface.moveTo(-2,8); surface.lineTo(8,-2);
-  surface.moveTo(-2,-2); surface.lineTo(8,8);
+  surface.moveTo(3,3); surface.lineTo(6,6);
+  surface.moveTo(6,3); surface.lineTo(3,6);
   surface.stroke();
 });
 /** @type {QreaseeCamera} */
