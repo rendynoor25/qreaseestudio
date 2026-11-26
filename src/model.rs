@@ -118,7 +118,8 @@ impl Object {
             && self.color.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit)
             && self.material.as_ref().is_none_or(|material| matches!(material.as_str(),
                 "brick" | "hebel" | "timber" | "zinc" | "clay_tile" | "concrete_tile" |
-                "glass" | "grass" | "sand" | "asphalt" | "metal" | "paint") ||
+                "glass" | "grass" | "sand" | "asphalt" | "metal" | "paint" |
+                "ceramic_white_40" | "ceramic_beige_60" | "ceramic_black_60") ||
                 material.starts_with("custom:") && material.len() <= 64)
             && self.material_scale.is_none_or(|scale| scale.is_finite()
                 && (1.0..=1000.0).contains(&scale))
@@ -1547,6 +1548,9 @@ mod tests {
     fn material_presets_are_validated() {
         let mut object = demo().objects.remove(0);
         object.material = Some("brick".into());
+        assert!(object.valid());
+        object.material = Some("ceramic_black_60".into());
+        object.material_scale = Some(60.0);
         assert!(object.valid());
         object.material = Some("bamboo".into());
         assert!(!object.valid());

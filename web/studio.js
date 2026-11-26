@@ -139,7 +139,10 @@ const materialPresets = [
   {id:'sand',name:'Pasir',color:'#d7c28e',pattern:'sand',tileCm:20},
   {id:'asphalt',name:'Aspal',color:'#4d5154',pattern:'asphalt',tileCm:20},
   {id:'metal',name:'Logam',color:'#959da3',pattern:'metal',tileCm:60},
-  {id:'paint',name:'Cat dasar',color:'#d7d9db',pattern:'paint',tileCm:30}
+  {id:'paint',name:'Cat dasar',color:'#d7d9db',pattern:'paint',tileCm:30},
+  {id:'ceramic_white_40',name:'Keramik putih 40x40',color:'#ecebe6',pattern:'ceramic',tileCm:40},
+  {id:'ceramic_beige_60',name:'Keramik beige 60x60',color:'#d8c6a8',pattern:'ceramic',tileCm:60},
+  {id:'ceramic_black_60',name:'Keramik hitam 60x60',color:'#3a3c3f',pattern:'ceramic',tileCm:60}
 ];
 const materialById = new Map(materialPresets.map(material=>[material.id,material]));
 const CUSTOM_MATERIALS_KEY='qreasee-custom-materials-v1';
@@ -2978,6 +2981,68 @@ function shellFromObject(source,extruded) {
   return {bottom,top,pieces:[bottom,top,...connectionFaces(bottom,target,solidId)]};
 }
 
+function polygonSideFace(loop,template,solidId,name) {
+  const face=QreaseeLine.polygonFromLoop(loop);
+  if (!face) return null;
+  return {...template,id:identity(),name,shape:'polygon',...face,height:0,rotation:0,
+    profile:{...face.profile,inferred:false},solid_id:solidId,surface_role:'side',
+    opening_id:null,opening_origin:null,wall_axis:null};
+}
+
+function polygonSolidPieces(loop,source,solidId,delta) {
+  const base={...source,solid_id:solidId,opening_id:null,opening_origin:null,height:0};
+  const top=polygonFace(loop.map(point=>offsetPoint(point,delta)),base,'Bidang atas');
+  if (!top) return null;
+  /** @type {any[]} */
+  const pieces=[{...top,id:identity(),solid_id:solidId,surface_role:'top'}];
+  for (let index=0;index<loop.length;index++) {
+    const a=loop[index],b=loop[(index+1)%loop.length];
+    if (Math.hypot(b[0]-a[0],b[1]-a[1],b[2]-a[2])<.001) continue;
+    const c=offsetPoint(a,delta),d=offsetPoint(b,delta);
+    const side=polygonSideFace([a,b,d,c],base,solidId,'Sisi '+(index+1));
+    if (side) pieces.push(side);
+    for (const [first,second] of [[a,b],[c,d],[a,c]]) {
+      const edge=lineObject(first,second,'Tepi');
+      if (edge) pieces.push({...edge,color:source.color,container:source.container??null,
+        solid_id:solidId,surface_role:'edge'});
+    }
+  }
+  return {top:pieces[0],pieces};
+}
+
+function shellFromPolygon(source,extruded) {
+  if (!(extruded.height>.001)) return null;
+  const loop=previewMesh({...source,height:0}).vertices;
+  if (loop.length<3) return null;
+  const normal=surfaceNormal(source),solidId=identity();
+  const delta=normal.map(value=>value*extruded.height);
+  const bottom=polygonFace(loop,{...source,solid_id:solidId},'Bidang bawah');
+  const solid=polygonSolidPieces(loop,source,solidId,delta);
+  if (!bottom||!solid) return null;
+  return {bottom,top:solid.top,
+    pieces:[{...bottom,id:source.id,solid_id:solidId,surface_role:'bottom',height:0},...solid.pieces]};
+}
+
+function rebuildPolygonSolid(before,after) {
+  const normal=surfaceNormal(before);
+  const bottom=objects().find(item=>item.solid_id===before.solid_id &&
+    item.surface_role==='bottom'&&item.shape==='polygon');
+  if (!bottom) return null;
+  const bottomCenter=surfaceCenter(bottom);
+  const start=dotPoint(normal,[before.x-bottomCenter[0],before.y-bottomCenter[1],
+    before.z-bottomCenter[2]]);
+  const moved=after.x!==before.x||after.y!==before.y||after.z!==before.z;
+  const amount=moved?dotPoint(normal,[after.x-before.x,after.y-before.y,after.z-before.z])
+    :after.height;
+  const span=start+amount;
+  if (span<.001) return null;
+  const loop=previewMesh({...bottom,height:0}).vertices;
+  const solid=polygonSolidPieces(loop,bottom,before.solid_id,normal.map(value=>value*span));
+  if (!solid) return null;
+  const removed=objects().filter(item=>item.solid_id===before.solid_id&&item.id!==bottom.id);
+  return batch(removed,solid.pieces,[solid.top.id]);
+}
+
 /** @param {QreaseePoint[]} loop @returns {string|null} */
 function loopPlaneKey(loop) {
   if (loop.length<3) return null;
@@ -3265,6 +3330,14 @@ function commitPull(before,after) {
     const targetOffset=normal.reduce((sum,value,i)=>sum+value*(target[i]-origin[i]),0);
     if (bottom && (targetOffset<-.001 || before.surface_role==='pocket'))
       return pocketOpening(before,bottom,target,origin);
+  }
+  if (before.solid_id && before.shape==='polygon' && before.surface_role==='top') {
+    const rebuilt=rebuildPolygonSolid(before,after);
+    if (rebuilt) return rebuilt;
+  }
+  if (before.shape==='polygon' && !before.solid_id && after.height>.001) {
+    const shell=shellFromPolygon(before,after);
+    if (shell) return batch([before],shell.pieces,[shell.top.id]);
   }
   if (before.solid_id && before.shape==='rectangle' &&
       (before.surface_role==='top' || before.surface_role==='side')) {
@@ -3788,23 +3861,36 @@ function shade(color,multiplier) {
 function drawMaterialTexture(face) {
   const material=face.object.material;
   const preset=material?materialById.get(material):null;
-  if (!preset || preset.pattern==='paint' || face.points.length<3) return;
-  const xs=face.points.map(point=>point[0]),ys=face.points.map(point=>point[1]);
-  const left=Math.min(...xs),right=Math.max(...xs),top=Math.min(...ys),bottom=Math.max(...ys);
-  const width=right-left,height=bottom-top;
-  if (width<3||height<3) return;
-  const scaleCm=safeScale(face.object.material_scale||preset.tileCm);
-  let worldLength=0,screenLength=0;
+  if (!preset||preset.pattern==='paint'||face.points.length<3) return;
   const world=face.world&&face.world.length===face.points.length?face.world:[];
-  for (let i=1;i<face.points.length;i++) {
-    screenLength+=Math.hypot(face.points[i][0]-face.points[i-1][0],
-      face.points[i][1]-face.points[i-1][1]);
-    if (world.length) worldLength+=Math.hypot(world[i][0]-world[i-1][0],
-      world[i][1]-world[i-1][1],world[i][2]-world[i-1][2]);
+  if (world.length<3) return;
+  const origin=world[0];
+  let u=null;
+  for (let i=1;i<world.length;i++) {
+    const delta=[world[i][0]-origin[0],world[i][1]-origin[1],world[i][2]-origin[2]];
+    const length=Math.hypot(delta[0],delta[1],delta[2]);
+    if (length>1e-6) {u=delta.map(value=>value/length);break;}
   }
-  const pixelsPerMeter=worldLength>1e-6?screenLength/worldLength:
-    Math.max(20,camera.scale);
-  const unit=clamp(pixelsPerMeter*scaleCm/100,10,160);
+  const normal=u?faceNormal(world):null;
+  if (!u||!normal) return;
+  const cross=[normal[1]*u[2]-normal[2]*u[1],normal[2]*u[0]-normal[0]*u[2],
+    normal[0]*u[1]-normal[1]*u[0]];
+  const crossLength=Math.hypot(cross[0],cross[1],cross[2]);
+  if (crossLength<1e-6) return;
+  const v=cross.map(value=>value/crossLength);
+  const plane=world.map(point=>{
+    const delta=[point[0]-origin[0],point[1]-origin[1],point[2]-origin[2]];
+    return [dotPoint(delta,u),dotPoint(delta,v)];
+  });
+  const minU=Math.min(...plane.map(point=>point[0])),maxU=Math.max(...plane.map(point=>point[0]));
+  const minV=Math.min(...plane.map(point=>point[1])),maxV=Math.max(...plane.map(point=>point[1]));
+  const spanU=maxU-minU,spanV=maxV-minV;
+  if (spanU<1e-4||spanV<1e-4) return;
+  const at=(a,b)=>/** @type {QreaseePoint} */ ([
+    origin[0]+u[0]*a+v[0]*b,origin[1]+u[1]*a+v[1]*b,origin[2]+u[2]*a+v[2]*b]);
+  const project=(a,b)=>stagePoint(at(a,b));
+  const scaleCm=safeScale(face.object.material_scale||preset.tileCm);
+  const tile=Math.max(.02,scaleCm/100,spanU/220,spanV/220);
   let seed=2166136261;
   for (const character of face.object.id+preset.pattern) {
     seed^=character.charCodeAt(0);
@@ -3814,100 +3900,125 @@ function drawMaterialTexture(face) {
     seed=(Math.imul(seed,1664525)+1013904223)>>>0;
     return seed/4294967296;
   };
+  const xs=face.points.map(point=>point[0]),ys=face.points.map(point=>point[1]);
+  const left=Math.min(...xs),right=Math.max(...xs),top=Math.min(...ys),bottom=Math.max(...ys);
   ctx.save();
   polygon(face.points);
   ctx.clip();
+  const line=(a1,b1,a2,b2,color,width=.85)=>{
+    const first=project(a1,b1),second=project(a2,b2);
+    if (!Number.isFinite(first[0])||!Number.isFinite(second[0])) return;
+    ctx.strokeStyle=color;ctx.lineWidth=width;
+    ctx.beginPath();ctx.moveTo(first[0],first[1]);ctx.lineTo(second[0],second[1]);ctx.stroke();
+  };
+  const rows=(step,color='#00000038')=>{
+    for (let value=Math.ceil(minV/step)*step;value<=maxV;value+=step)
+      line(minU,value,maxU,value,color);
+  };
   if (preset.pattern==='image') {
     const image=materialImages.get(material);
     if (image&&image.complete&&image.naturalWidth) {
-      const tileW=Math.max(5,unit);
-      const tileH=Math.max(5,unit*image.naturalHeight/image.naturalWidth);
-      for (let y=top;y<bottom;y+=tileH) for (let x=left;x<right;x+=tileW)
-        ctx.drawImage(image,x,y,tileW,tileH);
-      ctx.restore();
-      return;
+      const centerU=(minU+maxU)/2,centerV=(minV+maxV)/2;
+      const base=project(centerU,centerV),alongU=project(centerU+1,centerV),
+        alongV=project(centerU,centerV+1);
+      const perPixel=tile/image.naturalWidth;
+      const mx=(alongU[0]-base[0])*perPixel,my=(alongU[1]-base[1])*perPixel;
+      const nx=(alongV[0]-base[0])*perPixel,ny=(alongV[1]-base[1])*perPixel;
+      if (Number.isFinite(mx)&&Number.isFinite(my)&&Number.isFinite(nx)&&
+          Number.isFinite(ny)&&Math.abs(mx*ny-my*nx)>1e-9) {
+        const pattern=ctx.createPattern(image,'repeat');
+        if (pattern&&pattern.setTransform&&typeof DOMMatrix!=='undefined') {
+          pattern.setTransform(new DOMMatrix([mx,my,nx,ny,base[0],base[1]]));
+          ctx.fillStyle=pattern;
+          ctx.fillRect(left,top,right-left,bottom-top);
+        } else {
+          const step=Math.max(tile,spanU/24,spanV/24);
+          const scale=(step/tile);
+          ctx.transform(mx*scale,my*scale,nx*scale,ny*scale,base[0],base[1]);
+          const startU=Math.floor((minU-centerU)/step),endU=Math.ceil((maxU-centerU)/step);
+          const startV=Math.floor((minV-centerV)/step),endV=Math.ceil((maxV-centerV)/step);
+          for (let row=startV;row<=endV;row++) for (let column=startU;column<=endU;column++)
+            ctx.drawImage(image,column*image.naturalWidth,row*image.naturalHeight);
+        }
+      }
     }
     ctx.restore();
     return;
   }
-  ctx.lineWidth=.85;
-  const horizontalLines=(step,color='#00000038')=>{
-    ctx.strokeStyle=color;
-    for (let y=top+step;y<bottom;y+=step) {
-      ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();
-    }
-  };
-  const verticalLines=(step,color='#00000030',offset=0)=>{
-    ctx.strokeStyle=color;
-    for (let x=left+offset;x<right;x+=step) {
-      ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,bottom);ctx.stroke();
-    }
-  };
+  const color=preset.color||'#cccccc';
+  const light=(Number('0x'+color.slice(1,3))*299+Number('0x'+color.slice(3,5))*587+
+    Number('0x'+color.slice(5,7))*114)/1000>140;
   if (preset.pattern==='brick') {
-    const row=unit*.5;
-    horizontalLines(row,'#00000042');
-    for (let index=0,y=top;y<bottom;y+=row,index++) {
-      const offset=index%2?0:unit*.5;
-      ctx.strokeStyle='#00000038';
-      for (let x=left+offset;x<right;x+=unit) {
-        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,Math.min(bottom,y+row));ctx.stroke();
-      }
+    const row=tile*.5;
+    rows(row,'#00000042');
+    for (let value=Math.ceil(minV/row)*row;value<=maxV;value+=row) {
+      const offset=Math.round(value/row)%2?tile*.5:0;
+      for (let a=Math.ceil((minU-offset)/tile)*tile+offset;a<=maxU;a+=tile)
+        line(a,value,a,Math.min(maxV,value+row),'#00000038');
     }
   } else if (preset.pattern==='block') {
-    const row=unit*.4;
-    horizontalLines(row,'#00000036');
-    for (let index=0,y=top;y<bottom;y+=row,index++) {
-      const offset=index%2?0:unit*.4;
-      ctx.strokeStyle='#00000030';
-      for (let x=left+offset;x<right;x+=unit*.8) {
-        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,Math.min(bottom,y+row));ctx.stroke();
-      }
+    const row=tile*.4,width=tile*.8;
+    rows(row,'#00000036');
+    for (let value=Math.ceil(minV/row)*row;value<=maxV;value+=row) {
+      const offset=Math.round(value/row)%2?width*.5:0;
+      for (let a=Math.ceil((minU-offset)/width)*width+offset;a<=maxU;a+=width)
+        line(a,value,a,Math.min(maxV,value+row),'#00000030');
     }
   } else if (preset.pattern==='timber') {
-    ctx.strokeStyle='#00000038';
-    const spacing=Math.max(8,height/6);
-    for (let line=1,y=top+spacing;y<bottom;y+=spacing,line++) {
-      ctx.beginPath();
-      for (let x=left;x<=right;x+=Math.max(8,unit*.35)) {
-        const wave=base=>base+Math.sin((x-left)/(unit*.45||17)+line)*unit*.12+(random()-.5)*1.2;
-        if (x===left) ctx.moveTo(x,wave(y)); else ctx.lineTo(x,wave(y));
-      }
-      ctx.stroke();
+    for (let value=Math.ceil(minV/tile)*tile;value<=maxV;value+=tile) {
+      line(minU,value,maxU,value,'#0000003c',1);
+      line(minU,value+tile*.18,maxU,value+tile*.18,'#00000024',.6);
+      line(minU,value+tile*.46,maxU,value+tile*.46,'#00000018',.6);
+      line(minU,value+tile*.72,maxU,value+tile*.72,'#ffffff1c',.6);
     }
   } else if (preset.pattern==='zinc'||preset.pattern==='metal') {
-    verticalLines(unit,'#00000036');
-    verticalLines(unit,'#ffffff50',1);
+    for (let a=Math.ceil(minU/tile)*tile;a<=maxU;a+=tile) {
+      line(a,minV,a,maxV,'#00000036');
+      line(a+tile*.03,minV,a+tile*.03,maxV,'#ffffff50',.8);
+    }
   } else if (preset.pattern==='tile') {
-    const row=unit*.42,tile=unit*.55;
-    horizontalLines(row,'#00000044');
-    for (let index=0,y=top;y<bottom;y+=row,index++) {
-      ctx.strokeStyle='#ffffff4a';
-      for (let x=left+(index%2?0:tile*.5);x<right;x+=tile) {
-        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,Math.min(bottom,y+row));ctx.stroke();
+    const row=tile*.42,width=tile*.55;
+    rows(row,'#00000044');
+    for (let value=Math.ceil(minV/row)*row;value<=maxV;value+=row) {
+      const offset=Math.round(value/row)%2?width*.5:0;
+      for (let a=Math.ceil((minU-offset)/width)*width+offset;a<=maxU;a+=width) {
+        line(a,value,a,Math.min(maxV,value+row),'#00000038');
+        line(a+.008,value,a+.008,Math.min(maxV,value+row),'#ffffff40',.7);
       }
     }
-  } else if (preset.pattern==='glass') {
-    ctx.fillStyle='#ffffff28';ctx.fillRect(left,top,width,height);
-    ctx.strokeStyle='#ffffff55';ctx.lineWidth=2;
-    const step=Math.max(16,unit*.8);
-    for (let offset=-height;offset<width;offset+=step) {
-      ctx.beginPath();ctx.moveTo(left+offset,bottom);ctx.lineTo(left+offset+height,top);ctx.stroke();
+  } else if (preset.pattern==='ceramic') {
+    const grout=light?'#0000002e':'#ffffff26',bevel=light?'#ffffff55':'#00000030';
+    for (let a=Math.ceil(minU/tile)*tile;a<=maxU;a+=tile) {
+      line(a,minV,a,maxV,grout,1.1);
+      line(a+.012,minV,a+.012,maxV,bevel,.6);
     }
+    for (let value=Math.ceil(minV/tile)*tile;value<=maxV;value+=tile) {
+      line(minU,value,maxU,value,grout,1.1);
+      line(minU,value+.012,maxU,value+.012,bevel,.6);
+    }
+  } else if (preset.pattern==='glass') {
+    ctx.fillStyle='#ffffff22';ctx.fillRect(left,top,right-left,bottom-top);
+    const step=tile*1.4;
+    for (let offset=minV-minU;offset<=maxV-minU;offset+=step)
+      line(minU,minU+offset,maxU,maxU+offset,'#ffffff50',1.4);
   } else if (preset.pattern==='grass'||preset.pattern==='sand'||preset.pattern==='asphalt') {
-    const count=clamp(Math.round(width*height/(unit*unit)*6),16,110);
+    const count=clamp(Math.round(spanU*spanV/(tile*tile)*6),16,140);
     for (let i=0;i<count;i++) {
-      const x=left+random()*width,y=top+random()*height;
+      const point=project(minU+random()*spanU,minV+random()*spanV);
+      if (!Number.isFinite(point[0])) continue;
       if (preset.pattern==='grass') {
-        ctx.strokeStyle=i%3?'#ffffff42':'#00000038';
-        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+(random()-.5)*3,y-3-random()*4);ctx.stroke();
+        ctx.strokeStyle=i%3?'#ffffff42':'#00000038';ctx.lineWidth=.8;
+        ctx.beginPath();ctx.moveTo(point[0],point[1]);
+        ctx.lineTo(point[0]+(random()-.5)*2,point[1]-2-random()*3);ctx.stroke();
       } else {
         ctx.fillStyle=i%3?'#ffffff45':(preset.pattern==='asphalt'?'#0000004a':'#00000028');
-        ctx.beginPath();ctx.arc(x,y,random()*1.6+.5,0,Math.PI*2);ctx.fill();
+        ctx.beginPath();ctx.arc(point[0],point[1],random()*1.4+.5,0,Math.PI*2);ctx.fill();
       }
     }
   }
   ctx.restore();
 }
+
 /** @param {QreaseePoint[]} face @returns {number} */
 function smoothTone(face) {
   const [a,b,c]=face;

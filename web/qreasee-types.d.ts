@@ -7,6 +7,7 @@ type QreaseeView = 'perspective' | 'iso' | 'plan' | 'front' | 'right';
 type QreaseeShape = 'line' | 'rectangle' | 'circle' | 'polygon' | 'mesh';
 type QreaseeMaterial = 'brick' | 'hebel' | 'timber' | 'zinc' | 'clay_tile' |
   'concrete_tile' | 'glass' | 'grass' | 'sand' | 'asphalt' | 'metal' | 'paint' |
+  'ceramic_white_40' | 'ceramic_beige_60' | 'ceramic_black_60' |
   `custom:${string}`;
 type QreaseeTool =
   | 'select' | 'line' | 'arc' | 'offset' | 'rectangle' | 'circle'
