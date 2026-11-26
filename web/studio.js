@@ -122,6 +122,7 @@ const round = value => Math.round(value * 1000) / 1000;
 /** @param {QreaseePoint} point @returns {QreaseePoint} */
 const roundPoint = point => [round(point[0]), round(point[1]), round(point[2])];
 const snap = (value, step = .25) => Math.round(value / step) * step;
+const snapRadius = 14;
 const svgNS = 'http://www.w3.org/2000/svg';
 let statusTimer;
 const showStatus = message => {
@@ -1993,6 +1994,49 @@ function pickFace(point, preferLine) {
   return face;
 }
 
+/** @param {QreaseePoint2} point @param {number[][]} points @returns {number} */
+function pointToPolygonEdge(point,points) {
+  let best=Infinity;
+  for (let i=0;i<points.length;i++) {
+    const a=points[i],b=points[(i+1)%points.length];
+    const abx=b[0]-a[0],aby=b[1]-a[1];
+    const length=abx*abx+aby*aby;
+    const t=length>1e-9?clamp(((point[0]-a[0])*abx+(point[1]-a[1])*aby)/length,0,1):0;
+    best=Math.min(best,Math.hypot(point[0]-a[0]-abx*t,point[1]-a[1]-aby*t));
+  }
+  return best;
+}
+
+/** @param {QreaseeHit} face @param {{normal: QreaseePoint2}} wall @returns {boolean} */
+function verticalFaceVisible(face,wall) {
+  const point=face.world[0],depth=cameraAxes()[2];
+  if (camera.perspective) {
+    const eye=camera.center.map((value,i)=>value+camera.distance*depth[i]);
+    return wall.normal[0]*(eye[0]-point[0])+wall.normal[1]*(eye[1]-point[1])>1e-5;
+  }
+  return wall.normal[0]*depth[0]+wall.normal[1]*depth[1]>1e-5;
+}
+
+/** @param {QreaseePoint2} point @returns {{face: QreaseeHit|undefined, wall: {origin: QreaseePoint, axis: QreaseePoint2, normal: QreaseePoint2}|null}} */
+function pickRectangleFace(point) {
+  let containing=null,fallback=null;
+  for (let index=0;index<state.hits.length;index++) {
+    const face=state.hits[index];
+    if (face.world.length<3) continue;
+    const wall=QreaseeLine.verticalWall(face.world);
+    if (!wall || !verticalFaceVisible(face,wall)) continue;
+    if (contains(point,face.points)) containing={face,wall};
+    const distance=pointToPolygonEdge(point,face.points);
+    if (distance<=snapRadius &&
+        (!fallback || index>fallback.index ||
+          (index===fallback.index && distance<fallback.distance)))
+      fallback={face,wall,distance,index};
+  }
+  if (containing) return {face:containing.face,wall:containing.wall};
+  if (fallback) return {face:fallback.face,wall:fallback.wall};
+  return {face:pickFace(point,false),wall:null};
+}
+
 function orbitPivot(point) {
   const face=pickFace(point,false);
   if (!face) {
@@ -2041,18 +2085,58 @@ function pointOnVerticalPlane(point,origin,horizontalNormal) {
   return /** @type {QreaseePoint} */ (eye.map((value,i)=>value+t*ray[i]));
 }
 
-/** @param {number[]} point @param {number|undefined} elevation @param {Set<string>=} excluded @returns {QreaseeInference|null} */
-function infer(point, elevation, excluded = new Set()) {
+/** @param {QreaseePoint} world @param {QreaseePoint} origin @param {QreaseePoint2} normal */
+function onVerticalPlane(world,origin,normal) {
+  return Math.abs((world[0]-origin[0])*normal[0]+(world[1]-origin[1])*normal[1])<1e-4;
+}
+
+/** @param {QreaseePoint2} point @param {{origin: QreaseePoint, axis: QreaseePoint2, normal: QreaseePoint2}} wall @param {QreaseePoint=} base @returns {QreaseeInference|null} */
+function wallDrawingPoint(point,wall,base) {
+  const hit=infer(point,undefined,new Set(),world=>onVerticalPlane(world,wall.origin,wall.normal));
+  if (hit) return hit;
+  const raw=pointOnVerticalPlane(point,wall.origin,wall.normal);
+  if (!raw) return null;
+  if (!state.snapping) return {world:raw,label:'Bidang vertikal'};
+  const anchor=base??wall.origin;
+  const along=snap((raw[0]-anchor[0])*wall.axis[0]+(raw[1]-anchor[1])*wall.axis[1]);
+  const vertical=snap(raw[2]-anchor[2]);
+  return {world:[anchor[0]+along*wall.axis[0],anchor[1]+along*wall.axis[1],anchor[2]+vertical],
+    label:'Grid '+lengthLabel(.25)};
+}
+
+/** @param {number[]} point @param {number[]} a @param {number[]} b @returns {number} */
+function distanceToSegment(point,a,b) {
+  const ab=[b[0]-a[0],b[1]-a[1],b[2]-a[2]];
+  const ap=[point[0]-a[0],point[1]-a[1],point[2]-a[2]];
+  const length=dotPoint(ab,ab);
+  const t=length>1e-12?clamp(dotPoint(ap,ab)/length,0,1):0;
+  return Math.hypot(point[0]-a[0]-ab[0]*t,point[1]-a[1]-ab[1]*t,point[2]-a[2]-ab[2]*t);
+}
+
+/** @param {QreaseePoint} point @param {QreaseePoint[]} vertices @returns {boolean} */
+function onFaceBoundary(point,vertices) {
+  if (vertices.length<2) return false;
+  const count=vertices.length===2?1:vertices.length;
+  for (let i=0;i<count;i++) {
+    if (distanceToSegment(point,vertices[i],vertices[(i+1)%vertices.length])<1e-4) return true;
+  }
+  return false;
+}
+
+/** @param {number[]} point @param {number|undefined} elevation @param {Set<string>=} excluded @param {(world: QreaseePoint)=>boolean=} accept @returns {QreaseeInference|null} */
+function infer(point, elevation, excluded = new Set(), accept) {
   if (!state.snapping) return null;
   let best=null;
   const add=(world,label,penalty,owner)=>{
     if (elevation!==undefined && Math.abs(world[2]-elevation)>.00001) return;
+    if (accept && !accept(world)) return;
     const projected=stagePoint(world);
     const distance=Math.hypot(projected[0]-point[0],projected[1]-point[1]);
-    if (!(distance<=9) || (best && distance+penalty>=best.score)) return;
+    if (!(distance<=snapRadius) || (best && distance+penalty>=best.score)) return;
     const hit=state.hits.findLast(face=>!excluded.has(face.object.id) && contains(projected,face.points));
     if (hit && hit.object.id!==owner &&
-        !(hit.object.shape==='polygon' && hit.object.height===0 && Math.abs(hit.object.z-world[2])<.00001)) return;
+        !(hit.object.shape==='polygon' && hit.object.height===0 && Math.abs(hit.object.z-world[2])<.00001) &&
+        !onFaceBoundary(world,hit.world)) return;
     best={world,label,score:distance+penalty};
   };
   const interpolate=(a,b,t)=>a.map((value,i)=>value+(b[i]-value)*t);
@@ -2066,12 +2150,12 @@ function infer(point, elevation, excluded = new Set()) {
       const owner=face.object.id;
       add(a,'Ujung',0,owner);
       if (count===2) add(b,'Ujung',0,owner);
-      add(interpolate(a,b,.5),'Titik tengah',1,owner);
+      add(interpolate(a,b,.5),'Titik tengah',2,owner);
       const length=dx*dx+dy*dy;
       if (length<.01) continue;
       const fraction=clamp(((point[0]-p[0])*dx+(point[1]-p[1])*dy)/length,0,1);
       const t=fraction*p[3]/((1-fraction)*q[3]+fraction*p[3]);
-      add(interpolate(a,b,t),'Pada tepi',4,owner);
+      add(interpolate(a,b,t),'Pada tepi',snapRadius+2,owner);
     }
   }
   return best;
@@ -2093,15 +2177,9 @@ function drawingPoint(point,elevation) {
 
 function drawingCandidate(drag,point) {
   let candidate=drag.tool==='rectangle' && drag.wall
-    ? {world:pointOnVerticalPlane(point,drag.wall.origin,drag.wall.normal),label:'Bidang vertikal'}
+    ? wallDrawingPoint(point,drag.wall,drag.initial)
     : drawingPoint(point,drag.tool==='line'?undefined:drag.initial[2]);
   if (!candidate?.world) return null;
-  if (drag.tool==='rectangle' && drag.wall && state.snapping) {
-    const a=drag.initial,delta=candidate.world.map((value,i)=>value-a[i]);
-    const along=snap(delta[0]*drag.wall.axis[0]+delta[1]*drag.wall.axis[1]);
-    const vertical=snap(delta[2]);
-    candidate.world=[a[0]+along*drag.wall.axis[0],a[1]+along*drag.wall.axis[1],a[2]+vertical];
-  }
   if (drag.tool==='line' && state.snapping &&
       !['Ujung','Titik tengah','Pada tepi'].includes(candidate.label))
     candidate=QreaseeLine.axisSnap(drag.initial,point,stagePoint)||candidate;
@@ -2306,7 +2384,13 @@ canvas.addEventListener('pointerdown',event=>{
     state.drag={tool,start,camera:{...camera},axes,pivot,coordinates};
   } else {
     if (!state.doc || state.busy) return;
-    const face=pickFace(start,tool!=='pull');
+    let face=pickFace(start,tool!=='pull');
+    let rectangleWall=null;
+    if (tool==='rectangle') {
+      const picked=pickRectangleFace(start);
+      face=picked.face;
+      rectangleWall=picked.wall;
+    }
     if (tool==='select') {
       if (face) select(targetId(face.object),event.shiftKey);
       else {
@@ -2395,25 +2479,21 @@ canvas.addEventListener('pointerdown',event=>{
       if (!initial) { showStatus('Gunakan denah atau tampilan 3D untuk mengukur.');return; }
       state.drag={tool,start,initial:initial.world};
     } else {
-      if (tool==='rectangle' && face) {
-        const wall=QreaseeLine.verticalWall(face.world);
-        if (wall) {
-          const initial=pointOnVerticalPlane(start,wall.origin,wall.normal);
-          if (!initial) {showStatus('Arah pandang sejajar bidang vertikal. Putar kamera sedikit.');return;}
-          state.drag={tool,start,initial,id:identity(),wall,host:face.object};
-          canvas.setPointerCapture(event.pointerId);
-          return;
-        }
+      if (tool==='rectangle' && rectangleWall) {
+        const initial=wallDrawingPoint(start,rectangleWall);
+        if (!initial) {showStatus('Arah pandang sejajar bidang vertikal. Putar kamera sedikit.');return;}
+        state.drag={tool,start,initial:initial.world,id:identity(),wall:rectangleWall,host:face?.object};
+        state.inference=initial;
+        canvas.setPointerCapture(event.pointerId);
+        return;
       }
       const planeZ=tool==='rectangle' && face && face.world.length>=3 &&
         face.world.every(vertex=>Math.abs(vertex[2]-face.world[0][2])<.00001)
         ?face.world[0][2]:null;
-      const pointOnFace=planeZ===null?null:ground(start,planeZ);
-      const initial=pointOnFace
-        ?{world:[...(state.snapping?pointOnFace.map(value=>snap(value)):pointOnFace),planeZ]}
-        :drawingPoint(start);
+      const initial=planeZ===null?drawingPoint(start):drawingPoint(start,planeZ);
       if (!initial) { showStatus('Gunakan denah atau aksonometri untuk menggambar.');return; }
       state.drag={tool,start,initial:initial.world,id:identity(),host:tool==='rectangle'?face?.object:null};
+      state.inference=initial;
     }
   }
   canvas.setPointerCapture(event.pointerId);
