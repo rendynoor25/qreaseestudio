@@ -31,6 +31,7 @@ window.qreaseeDemoPost = async (url, request) => {
       if (request.blank) {
         document.objects = [];
         document.comments = [];
+        document.share = {role:'edit'};
         document.sheet.title = 'Proyek tanpa judul';
       }
       const room = await cloudRpc('qreasee_create_room', { p_document: document });
@@ -45,12 +46,14 @@ window.qreaseeDemoPost = async (url, request) => {
     const document = payload.document;
     return { code: 200, data: {
       changes: document ? { document, ...demoMeshes(document) } : null,
-      peers: payload.peers || [], topology: { added: [], removed: [] }
+      peers: payload.peers || [], topology: { added: [], removed: [] },
+      can_manage: Boolean(payload.can_manage), role: payload.role || 'edit'
     } };
   } catch (error) {
-    const commentError=['invalid_comment','invalid_target','comment_limit'].includes(error.message);
+    const commentError=['invalid_comment','invalid_target','comment_limit','invalid_share'].includes(error.message);
+    const accessError=['forbidden','read_only','comment_only'].includes(error.message);
     const code = error.message === 'room_missing' ? 404 : error.message === 'conflict' ? 409 :
-      commentError ? 422 :
+      commentError ? 422 : accessError ? 403 :
       error.message === 'login_required' || error.status === 401 || error.status === 403 ? 401 : 503;
     let changes;
     if (code === 409) {
@@ -65,7 +68,10 @@ window.qreaseeDemoPost = async (url, request) => {
     }
     return { code, data: { error: code === 503 ? 'Ruang bersama belum siap: ' + error.message :
       code === 401 ? 'Sesi berakhir. Masuk kembali dengan Google.' :
-      code === 422 ? 'Komentar tidak valid atau objek target sudah dihapus.' :
+      code === 403 ? (error.message === 'forbidden' ? 'Hanya pemilik proyek yang dapat mengubah akses.' :
+        error.message === 'comment_only' ? 'Akses ini hanya dapat menambah komentar.' :
+        'Akses ini hanya dapat melihat proyek.') :
+      code === 422 ? 'Komentar atau akses tidak valid.' :
       code === 409 ? 'Objek atau lembar sudah diubah di sesi lain.' : 'Ruang tidak ditemukan.',
       changes, peers: [] } };
   }

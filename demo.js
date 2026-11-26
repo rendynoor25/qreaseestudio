@@ -74,7 +74,17 @@ function demoCommentTargetExists(document,target) {
 }
 
 function demoApply(document, edit) {
-  if (edit.type === 'sheet') {
+  document.share=document.share || {role:'edit'};
+  const role=document.share.role;
+  if (edit.type !== 'share') {
+    if (role === 'view') return 'read_only';
+    if (role === 'comment' && edit.type !== 'comment') return 'comment_only';
+  }
+  if (edit.type === 'share') {
+    if (JSON.stringify(document.share) !== JSON.stringify(edit.before)) return 'conflict';
+    if (!['edit','comment','view'].includes(edit.after?.role)) return 'invalid_share';
+    document.share={role:edit.after.role};
+  } else if (edit.type === 'sheet') {
     if (JSON.stringify(document.sheet) !== JSON.stringify(edit.before)) return 'conflict';
     document.sheet = demoCopy(edit.after);
   } else if (edit.type === 'object' || edit.type === 'batch') {
@@ -111,13 +121,14 @@ function demoApply(document, edit) {
         if (comments.length>=200) return 'Batas demo adalah 200 komentar.';
         comments.push(demoCopy(after));
       }
+      document.comments=comments;
     } else {
       if (!before) return 'Komentar tidak valid.';
       const index=comments.findIndex(comment=>comment.id===before.id);
       if (index<0 || JSON.stringify(comments[index])!==JSON.stringify(before)) return 'conflict';
-      comments.splice(index,1);
+      document.comments=comments.filter(comment=>comment.id!==before.id &&
+        comment.parent!==before.id);
     }
-    document.comments=comments;
   } else return 'Perintah tidak dikenal.';
   document.revision += 1;
   return null;
@@ -129,6 +140,7 @@ window.qreaseeDemoPost = async (url, request) => {
     if (request.blank) {
       document.objects = [];
       document.comments = [];
+      document.share = {role:'edit'};
       document.sheet.title = 'Proyek tanpa judul';
     }
     const room = crypto.randomUUID();
@@ -142,17 +154,23 @@ window.qreaseeDemoPost = async (url, request) => {
   if (request.edit) {
     const next = demoCopy(document);
     const error = demoApply(next, request.edit);
-    if (error) return { code: error === 'conflict' ? 409 : 422,
-      data: { error: error === 'conflict' ? 'Objek ini sudah diubah di tab lain.' : error,
-        changes: { document, ...demoMeshes(document) }, peers: [] } };
+    if (error) {
+      const code=error==='conflict'?409:error==='read_only'||error==='comment_only'?403:422;
+      return { code,
+        data: { error: error === 'conflict' ? 'Objek ini sudah diubah di tab lain.' :
+          error === 'read_only' ? 'Akses ini hanya dapat melihat proyek.' :
+          error === 'comment_only' ? 'Akses ini hanya dapat menambah komentar.' : error,
+          can_manage: true, role: document.share?.role || 'edit',
+          changes: { document, ...demoMeshes(document) }, peers: [] } };
+    }
     localStorage.setItem(demoKey(room), JSON.stringify(next));
     return { code: 200, data: { changes: { document: next, ...demoMeshes(next) },
       peers: [{ id: request.client, name: request.name || 'Anda', cursor: request.cursor || null }],
-      topology: { added: [], removed: [] } } };
+      topology: { added: [], removed: [] }, can_manage: true, role: next.share?.role || 'edit' } };
   }
   return { code: 200, data: {
     changes: request.revision === document.revision ? null : { document, ...demoMeshes(document) },
     peers: [{ id: request.client, name: request.name || 'Anda', cursor: request.cursor || null }],
-    topology: null
+    topology: null, can_manage: true, role: document.share?.role || 'edit'
   } };
 };
