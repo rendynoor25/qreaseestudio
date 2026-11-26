@@ -2108,6 +2108,7 @@ var QreaseeLine = (() => {
     closedLoop: () => closedLoop,
     connectedFaces: () => connectedFaces,
     connectedLines: () => connectedLines,
+    connectedParts: () => connectedParts,
     measuredEndpoint: () => measuredEndpoint,
     measuredRectangle: () => measuredRectangle,
     polygonFromLoop: () => polygonFromLoop,
@@ -2772,6 +2773,130 @@ var QreaseeLine = (() => {
         }
       }
       for (const next of byTouch.get(id) ?? []) {
+        if (!selected.has(next)) {
+          selected.add(next);
+          queue.push(next);
+        }
+      }
+    }
+    return queue;
+  }
+  var segmentDirection = (a, b) => {
+    const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+    const length = Math.hypot(dx, dy, dz);
+    return length < 1e-9 ? null : [dx / length, dy / length, dz / length];
+  };
+  var segmentsOverlap = (a1, a2, b1, b2, tolerance = 1e-4) => {
+    const direction = segmentDirection(b1, b2);
+    if (!direction) return false;
+    const offset = (point) => (point[0] - b1[0]) * direction[0] + (point[1] - b1[1]) * direction[1] + (point[2] - b1[2]) * direction[2];
+    const distance = (point) => {
+      const t = offset(point);
+      return Math.hypot(
+        point[0] - b1[0] - direction[0] * t,
+        point[1] - b1[1] - direction[1] * t,
+        point[2] - b1[2] - direction[2] * t
+      );
+    };
+    if (distance(a1) > tolerance || distance(a2) > tolerance) return false;
+    const length = Math.hypot(b2[0] - b1[0], b2[1] - b1[1], b2[2] - b1[2]);
+    const low = Math.min(offset(a1), offset(a2)), high = Math.max(offset(a1), offset(a2));
+    return Math.max(low, 0) <= Math.min(high, length) + tolerance;
+  };
+  function connectedParts(seedId, entries) {
+    const vertexKey = (point) => point.map((value) => Math.round(value * precision)).join(":");
+    const adjacency = /* @__PURE__ */ new Map();
+    const link = (first, second) => {
+      if (first === second) return;
+      if (!adjacency.has(first)) adjacency.set(first, /* @__PURE__ */ new Set());
+      if (!adjacency.has(second)) adjacency.set(second, /* @__PURE__ */ new Set());
+      adjacency.get(first).add(second);
+      adjacency.get(second).add(first);
+    };
+    const byEdge = /* @__PURE__ */ new Map();
+    const byPlane = /* @__PURE__ */ new Map();
+    const faceEdges = /* @__PURE__ */ new Map();
+    for (const { object, mesh } of entries) {
+      if (object.shape === "line" || !mesh) continue;
+      const edges = [];
+      for (const face of mesh.faces) {
+        for (let i = 0; i < face.length; i++) {
+          const a = mesh.vertices[face[i]], b = mesh.vertices[face[(i + 1) % face.length]];
+          if (!a || !b) continue;
+          const ends = [vertexKey(a), vertexKey(b)].sort();
+          if (ends[0] === ends[1]) continue;
+          edges.push([a, b]);
+          const edge = ends.join("|");
+          if (!byEdge.has(edge)) byEdge.set(edge, /* @__PURE__ */ new Set());
+          byEdge.get(edge).add(object.id);
+        }
+        const vertices = face.map((index) => mesh.vertices[index]).filter((point) => Boolean(point));
+        const plane = faceOnPlane(vertices);
+        if (!plane) continue;
+        const xs = plane.points.map((point) => point[0]), ys = plane.points.map((point) => point[1]);
+        const min = [Math.min(...xs), Math.min(...ys)];
+        const max = [Math.max(...xs), Math.max(...ys)];
+        if (!byPlane.has(plane.key)) byPlane.set(plane.key, []);
+        byPlane.get(plane.key).push({ id: object.id, points: plane.points, min, max });
+      }
+      faceEdges.set(object.id, edges);
+    }
+    for (const ids of byEdge.values()) {
+      const list = [...ids];
+      for (let i = 1; i < list.length; i++) link(list[0], list[i]);
+    }
+    for (const faces of byPlane.values()) {
+      for (let i = 0; i < faces.length; i++) {
+        for (let j = i + 1; j < faces.length; j++) {
+          if (faces[i].id !== faces[j].id && polygonTouches(faces[i], faces[j]))
+            link(faces[i].id, faces[j].id);
+        }
+      }
+    }
+    const lineSegments = /* @__PURE__ */ new Map();
+    const byPoint = /* @__PURE__ */ new Map();
+    for (const { object, mesh } of entries) {
+      if (object.shape !== "line" || !mesh || mesh.vertices.length < 2) continue;
+      const a = mesh.vertices[0], b = mesh.vertices[1];
+      lineSegments.set(object.id, [a, b]);
+      for (const point of [a, b]) {
+        const vertex = vertexKey(point);
+        if (!byPoint.has(vertex)) byPoint.set(vertex, /* @__PURE__ */ new Set());
+        byPoint.get(vertex).add(object.id);
+      }
+    }
+    for (const ids of byPoint.values()) {
+      const list = [...ids];
+      for (let i = 1; i < list.length; i++) link(list[0], list[i]);
+    }
+    const lines = [...lineSegments.entries()];
+    for (let i = 0; i < lines.length; i++) {
+      for (let j = i + 1; j < lines.length; j++) {
+        if (segmentsOverlap(lines[i][1][0], lines[i][1][1], lines[j][1][0], lines[j][1][1]))
+          link(lines[i][0], lines[j][0]);
+      }
+    }
+    const linesByEdge = /* @__PURE__ */ new Map();
+    for (const [id, [a, b]] of lineSegments) {
+      const edge = [vertexKey(a), vertexKey(b)].sort().join("|");
+      if (!linesByEdge.has(edge)) linesByEdge.set(edge, []);
+      linesByEdge.get(edge).push(id);
+    }
+    for (const [edge, ids] of byEdge) {
+      const related = linesByEdge.get(edge);
+      if (!related) continue;
+      for (const face of ids) for (const line of related) link(face, line);
+    }
+    for (const [faceId, edges] of faceEdges) {
+      for (const [lineId, [a, b]] of lineSegments) {
+        if (adjacency.get(faceId)?.has(lineId)) continue;
+        if (edges.some(([c, d]) => segmentsOverlap(a, b, c, d))) link(faceId, lineId);
+      }
+    }
+    if (!adjacency.has(seedId)) return [seedId];
+    const selected = /* @__PURE__ */ new Set([seedId]), queue = [seedId];
+    for (const id of queue) {
+      for (const next of adjacency.get(id) ?? []) {
         if (!selected.has(next)) {
           selected.add(next);
           queue.push(next);

@@ -239,6 +239,7 @@ function setTool(tool) {
     return;
   }
   if (state.tool!==tool) {
+    state.drag=null;
     state.arcPending=null;
     state.linePending=null;
     state.linePress=null;
@@ -2527,14 +2528,7 @@ function selectConnected(object,additive=false) {
   const eligible=objects().map((item,index)=>({object:item,mesh:state.meshes[index]}))
     .filter(entry=>entry.mesh && targetId(entry.object)===entry.object.id &&
       (entry.object.container?.id??null)===(object.container?.id??null));
-  const ids=object.shape==='line'
-    ? QreaseeLine.connectedLines(object.id,eligible.map(entry=>entry.object))
-    : QreaseeLine.connectedFaces(object.id,eligible);
-  if (object.shape!=='line') {
-    for (const id of QreaseeLine.boundaryLineIds(ids,eligible)) {
-      if (!ids.includes(id)) ids.push(id);
-    }
-  }
+  const ids=QreaseeLine.connectedParts(object.id,eligible);
   state.selected=additive?new Set([...state.selected,...ids]):new Set(ids);
   refresh();
   showStatus(ids.length+' objek terhubung dipilih.');
@@ -5058,6 +5052,10 @@ canvas.addEventListener('pointerdown',event=>{
         if (!initial) {showStatus('Arah pandang sejajar bidang vertikal. Putar kamera sedikit.');return;}
         state.drag={tool,start,initial:initial.world,id:identity(),wall:planeWall,host:face?.object};
         state.inference=initial;
+        showStatus(tool==='rectangle'
+          ? 'Sudut pertama ditetapkan. Klik sudut berlawanan atau ketik X x Y lalu Enter.'
+          : 'Pusat ditetapkan. Klik titik tepi atau ketik radius lalu Enter.');
+        redraw();
         canvas.setPointerCapture(event.pointerId);
         return;
       }
@@ -5069,6 +5067,10 @@ canvas.addEventListener('pointerdown',event=>{
       state.drag={tool,start,initial:initial.world,id:identity(),
         host:tool==='rectangle'||tool==='circle'?face?.object:null};
       state.inference=initial;
+      showStatus(tool==='rectangle'
+        ? 'Sudut pertama ditetapkan. Klik sudut berlawanan atau ketik X x Y lalu Enter.'
+        : 'Pusat ditetapkan. Klik titik tepi atau ketik radius lalu Enter.');
+      redraw();
     }
   }
   canvas.setPointerCapture(event.pointerId);
@@ -5268,6 +5270,8 @@ canvas.addEventListener('pointermove',event=>{
   }
   state.inference=null;
   const dx=point[0]-drag.start[0], dy=point[1]-drag.start[1];
+  if ((drag.tool==='rectangle'||drag.tool==='circle') &&
+      Math.hypot(dx,dy)>=4) drag.moved=true;
   if (drag.tool==='section-move') {
     const distance=sectionAxisDistance(point,drag.base,drag.normal);
     if (distance!==null) {
@@ -5434,11 +5438,19 @@ canvas.addEventListener('pointerup',()=>{
     const object=drag.preview;
     const valid=object.shape==='line' ? Math.hypot(object.width,object.depth,object.height)>.001
       : object.width>.001 && object.depth>.001;
-    if (valid) {
+    const clickLike=(drag.tool==='rectangle'||drag.tool==='circle')&&!drag.moved;
+    if (valid&&!clickLike) {
       if (drag.tool==='rectangle') insertRectangle(object,drag.host);
       else if (drag.tool==='line') addLineObject(object);
       else placePlanarFace(object);
       $('#line-length').value='';
+    } else if (clickLike || (drag.tool!=='line' && !valid)) {
+      state.drawPending={...drag,preview:null,previewArc:null,updates:null};
+      showStatus(drag.tool==='rectangle'
+        ? 'Sudut pertama ditetapkan. Klik sudut berlawanan atau ketik X x Y lalu Enter.'
+        : drag.tool==='circle'
+        ? 'Pusat ditetapkan. Klik titik tepi atau ketik radius lalu Enter.'
+        : 'Masukkan ukuran bila perlu, lalu klik arah pada kanvas.');
     }
   } else if (drag?.updates && drag.updates.some((object,i)=>JSON.stringify(object)!==JSON.stringify(drag.sources[i]))) {
     if (['move','rotate','scale'].includes(drag.tool) && targetId(drag.object)!==drag.object.id) {
@@ -5448,7 +5460,11 @@ canvas.addEventListener('pointerup',()=>{
     if (drag.tool==='pull') $('#line-length').value='';
   } else if (drag && ['rectangle','circle','arc','pull'].includes(drag.tool)) {
     state.drawPending={...drag,preview:null,previewArc:null,updates:null};
-    showStatus('Masukkan ukuran bila perlu, lalu klik arah pada kanvas.');
+    showStatus(drag.tool==='rectangle'
+      ? 'Sudut pertama ditetapkan. Klik sudut berlawanan atau ketik X x Y lalu Enter.'
+      : drag.tool==='circle'
+      ? 'Pusat ditetapkan. Klik titik tepi atau ketik radius lalu Enter.'
+      : 'Masukkan ukuran bila perlu, lalu klik arah pada kanvas.');
   }
   redraw();
 });
@@ -5516,7 +5532,7 @@ window.addEventListener('keydown',event=>{
     removeObject();
     return;
   }
-  if (buttonFocus) return;
+  if (buttonFocus && !/^[a-z]$/i.test(event.key)) return;
   if ((['line','rectangle','circle','arc','pull'].includes(state.tool) ||
       (state.tool==='rotate'&&state.rotatePending) ||
       (state.tool==='offset'&&state.offsetPending)) && !state.layout &&

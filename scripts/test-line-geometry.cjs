@@ -103,4 +103,27 @@ const boundary=geometry.boundaryLineIds(['face'],[
 ]);
 assert.equal(JSON.stringify(boundary),JSON.stringify(['border']),
   'triple-click boundaries include only lines lying on face edges');
+const boxEntries=[
+  {object:{id:'bottom',shape:'rectangle'},mesh:{vertices:[[0,0,0],[2,0,0],[2,2,0],[0,2,0]],faces:[[0,1,2,3]]}},
+  {object:{id:'top',shape:'rectangle'},mesh:{vertices:[[0,0,2],[2,0,2],[2,2,2],[0,2,2]],faces:[[0,1,2,3]]}},
+  {object:{id:'front',shape:'rectangle'},mesh:{vertices:[[0,0,0],[2,0,0],[2,0,2],[0,0,2]],faces:[[0,1,2,3]]}},
+  {object:{id:'frontBottom',shape:'line'},mesh:{vertices:[[0,0,0],[2,0,0]],faces:[]}},
+  {object:{id:'frontTop',shape:'line'},mesh:{vertices:[[0,0,2],[2,0,2]],faces:[]}},
+  {object:{id:'frontLeft',shape:'line'},mesh:{vertices:[[0,0,0],[0,0,2]],faces:[]}},
+  {object:{id:'frontRight',shape:'line'},mesh:{vertices:[[2,0,0],[2,0,2]],faces:[]}},
+  {object:{id:'far',shape:'line'},mesh:{vertices:[[10,10,0],[10,12,0]],faces:[]}}
+];
+const expectedBox=['bottom','front','frontBottom','frontLeft','frontRight','frontTop','top'];
+assert.equal(JSON.stringify(geometry.connectedParts('frontBottom',boxEntries).sort()),
+  JSON.stringify(expectedBox),'triple-click a line selects faces and lines together');
+assert.equal(JSON.stringify(geometry.connectedParts('front',boxEntries).sort()),
+  JSON.stringify(expectedBox),'triple-click a face selects lines and faces together');
+assert.equal(JSON.stringify(geometry.connectedParts('far',boxEntries).sort()),
+  JSON.stringify(['far']),'unconnected line stays alone');
+const partialEdge=[
+  {object:{id:'deck',shape:'rectangle'},mesh:{vertices:[[0,5,0],[4,5,0],[4,7,0],[0,7,0]],faces:[[0,1,2,3]]}},
+  {object:{id:'halfEdge',shape:'line'},mesh:{vertices:[[0,5,0],[2,5,0]],faces:[]}}
+];
+assert.equal(JSON.stringify(geometry.connectedParts('deck',partialEdge).sort()),
+  JSON.stringify(['deck','halfEdge']),'line touching part of a face edge stays connected');
 console.log('3D faces, line intersections, rectangle cuts, and shape intersections passed');
