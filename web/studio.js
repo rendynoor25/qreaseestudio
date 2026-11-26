@@ -645,6 +645,9 @@ async function openRoom(createBlank) {
   state.plans = [];
   state.selected.clear();
   state.inside = null;
+  exitLayoutView();
+  layoutSelected = null;
+  $('#layout-selection').hidden = true;
   state.inference = null;
   state.arcPending = null;
   state.linePending = null;
@@ -3094,6 +3097,59 @@ function strokeLine(a,b,color,width=1) {
   ctx.stroke();
 }
 
+$('#export-dwg').onclick = async () => {
+  if (!state.doc) return;
+  const button = $('#export-dwg');
+  button.disabled = true;
+  try {
+    const {exportDwg} = await import('./cad-export.js');
+    const bytes = exportDwg(state.meshes);
+    download('.dwg','application/acad',bytes);
+    showStatus('Model DWG berhasil diunduh.');
+  } catch (error) {
+    showStatus('Ekspor DWG gagal: ' + (error instanceof Error ? error.message : String(error)));
+  } finally {
+    button.disabled = false;
+  }
+};
+$('#export-layout-dwg').onclick = async () => {
+  if (!state.doc) return;
+  const button = $('#export-layout-dwg');
+  button.disabled = true;
+  try {
+    drawSheet();
+    const {exportLayoutDwg} = await import('./cad-export.js');
+    const bytes = exportLayoutDwg($('#sheet'));
+    download('-layout.dwg','application/acad',bytes);
+    showStatus('Lembar Layout DWG berhasil diunduh.');
+  } catch (error) {
+    showStatus('Ekspor Layout DWG gagal: ' + (error instanceof Error ? error.message : String(error)));
+  } finally {
+    button.disabled = false;
+  }
+};
+$('#import-skp').onclick = () => $('#skp-file').click();
+$('#skp-file').onchange = async event => {
+  const input = /** @type {HTMLInputElement} */ (event.target);
+  const file = input.files?.[0];
+  input.value = '';
+  $('#file-menu').open = false;
+  if (!file || !state.doc) return;
+  const button = $('#import-skp');
+  button.disabled = true;
+  try {
+    const {importSkp} = await import('./skp-import.js');
+    const imported = importSkp(await file.arrayBuffer(), file.name);
+    if (state.doc.objects.length + imported.length > 250) throw new Error('Ruang model melebihi batas 250 objek.');
+    if (JSON.stringify({type:'batch',before:[],after:imported}).length > 200_000) throw new Error('Impor terlalu besar untuk satu perubahan kolaborasi.');
+    const saved = await batch([], imported, [imported[0].container.id]);
+    if (saved) showStatus(`${imported.length} bagian SketchUp berhasil diimpor.`);
+  } catch (error) {
+    showStatus('Impor SKP gagal: ' + (error instanceof Error ? error.message : String(error)));
+  } finally {
+    button.disabled = false;
+  }
+};
 function clipNear(world) {
   const [,,depth]=cameraAxes();
   const near=nearPlane;
@@ -3811,6 +3867,19 @@ function pickRectangleFace(point) {
   let containing=null,fallback=null;
   for (let index=0;index<state.hits.length;index++) {
     const face=state.hits[index];
+  if(object.shape==='mesh' && object.geometry){
+    const angle=object.rotation*Math.PI/180, sin=Math.sin(angle), cos=Math.cos(angle);
+    const spans=[object.width,object.depth,object.height].map((size,axis)=>{
+      const positions=object.geometry.vertices.map(point=>point[axis]);
+      const original=Math.max(...positions)-Math.min(...positions);
+      return original<1e-9?1:size/original;
+    });
+    return {vertices:object.geometry.vertices.map(([x,y,z])=>/** @type {QreaseePoint} */ ([
+      object.x+x*spans[0]*cos-y*spans[1]*sin,
+      object.y+x*spans[0]*sin+y*spans[1]*cos,
+      object.z+z*spans[2]])),
+      faces:object.geometry.faces,cut:false};
+  }
     if (face.world.length<3) continue;
     const wall=QreaseeLine.verticalWall(face.world);
     if (!wall || !verticalFaceVisible(face,wall)) continue;
@@ -5252,7 +5321,9 @@ $('#layout-delete').onclick=()=>{
     :layoutSelected.kind==='dimension'
     ?{...layout,dimensions:layout.dimensions.filter(item=>item.id!==layoutSelected.id)}
     :{...layout,texts:layout.texts.filter(item=>item.id!==layoutSelected.id)};
-  layoutSelected=null;$('#layout-selection').hidden=true;saveSheetLayout(next);
+  layoutSelected=null;$('#layout-selection').hidden=true;
+  if(deletingActiveView)exitLayoutView();
+  saveSheetLayout(next);
 };
 
 window.addEventListener('hashchange',()=>roomFromHash()?openRoom():showProjectHome());
@@ -5265,3 +5336,4 @@ setInterval(()=>{
 if (roomFromHash()) openRoom();
 else if (window.qreaseeAuth) window.qreaseeAuth.ready.then(()=>renderProjectHome());
 else renderProjectHome();
+  const deletingActiveView=layoutSelected.kind==='view'&&layoutSelected.id===layoutActiveViewId;

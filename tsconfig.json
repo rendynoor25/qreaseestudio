@@ -15,5 +15,5 @@
     "types": []
   },
   "include": ["web/**/*.js", "web/**/*.ts"],
-  "exclude": ["node_modules", "dist", "target", "data", "data-lan-demo"]
+  "exclude": ["node_modules", "dist", "target", "data", "data-lan-demo", "web/cad-export.js", "web/skp-import.js"]
 }

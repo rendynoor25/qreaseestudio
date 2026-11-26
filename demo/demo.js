@@ -40,7 +40,9 @@ function demoMeshes(document) {
     const cached=demoMeshCache.get(object.id);
     if(cached.plan && cached.cutHeight===document.sheet.cut_height) return cached.plan;
     let plan;
-    if (object.plane_u) {
+    if (object.shape==='mesh') {
+      plan=meshes[index];
+    } else if (object.plane_u) {
       const mesh=demoCopy(meshes[index]);
       plan=mesh.vertices.every(point=>point[2]>document.sheet.cut_height)
         ?{vertices:[],faces:[],cut:false}:mesh;

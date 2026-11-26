@@ -4,10 +4,13 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "test:geometry": "node scripts/build-line.cjs && node scripts/test-line-geometry.cjs",
     "build:line": "node scripts/build-line.cjs",
+    "build:cad": "node scripts/build-cad.cjs",
     "build:demo": "node scripts/build-demo.cjs"
   },
   "dependencies": {
+    "@node-projects/acad-ts": "^3.10.0",
     "@supabase/supabase-js": "2.119.2",
+    "openskp": "^1.7.0",
     "polygon-clipping": "^0.15.7"
   },
   "devDependencies": {

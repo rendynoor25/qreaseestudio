@@ -3,6 +3,7 @@ const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
 require('./build-line.cjs');
+require('./build-cad.cjs');
 const output = path.join(root, 'dist');
 const cloud = process.env.QREASEE_CLOUD_DEMO === '1';
 const auth = process.env.QREASEE_AUTH_DEMO === '1';
@@ -31,7 +32,7 @@ if (auth && !html.includes('id="auth-gate"')) {
   throw new Error('Authenticated demo must include the sign-in gate.');
 }
 fs.writeFileSync(path.join(output, 'index.html'), html);
-for (const name of ['studio.css', 'studio.js', 'line-geometry.js', 'qreasee-logo.png', 'qreasee-logo-black.png']) {
+for (const name of ['studio.css', 'studio.js', 'line-geometry.js', 'cad-export.js', 'skp-import.js', 'qreasee-logo.png', 'qreasee-logo-black.png']) {
   fs.copyFileSync(path.join(root, 'web', name), path.join(output, name));
 }
 fs.copyFileSync(path.join(root, 'demo', 'demo.js'), path.join(output, 'demo.js'));

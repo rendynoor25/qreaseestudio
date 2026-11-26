@@ -35,12 +35,19 @@ pub enum Shape {
     Rectangle,
     Circle,
     Polygon,
+    Mesh,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Profile {
     pub points: Vec<[f64; 2]>,
     pub inferred: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImportedGeometry {
+    pub vertices: Vec<Point>,
+    pub faces: Vec<[usize; 3]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -62,6 +69,8 @@ pub struct Object {
     pub container: Option<Box<Membership>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<Box<Profile>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geometry: Option<Box<ImportedGeometry>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wall_axis: Option<[f64; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -139,6 +148,18 @@ impl Object {
                 self.opening_id.is_some() && point.iter().copied().all(bounded)
             })
             && self.container.as_deref().is_none_or(Membership::valid)
+            && match (&self.shape, &self.geometry) {
+                (Shape::Mesh, Some(geometry)) => {
+                    !geometry.vertices.is_empty()
+                        && geometry.vertices.len() <= 6_000
+                        && !geometry.faces.is_empty()
+                        && geometry.faces.len() <= 3_000
+                        && geometry.vertices.iter().flatten().copied().all(bounded)
+                        && geometry.faces.iter().flatten().all(|index| *index < geometry.vertices.len())
+                }
+                (Shape::Mesh, None) | (_, Some(_)) => false,
+                _ => true,
+            }
             && match (&self.shape, &self.profile) {
                 (Shape::Polygon, Some(profile)) => {
                     profile.points.len() >= 3
@@ -156,6 +177,7 @@ impl Object {
             }
             && match self.shape {
                 Shape::Line => self.width.hypot(self.depth).hypot(self.height) >= 0.001,
+                Shape::Mesh => self.width >= 0.0 && self.depth >= 0.0 && self.height >= 0.0,
                 _ => self.width >= 0.001 && self.depth >= 0.001 && self.height >= 0.0,
             }
     }
@@ -180,6 +202,7 @@ impl Object {
                 .iter()
                 .map(|point| [point[0] * self.width, point[1] * self.depth])
                 .collect(),
+            Shape::Mesh => vec![[-w, -d], [w, -d], [w, d], [-w, d]],
         };
         let (sin, cos) = self.rotation.to_radians().sin_cos();
         outline
@@ -189,6 +212,25 @@ impl Object {
     }
 
     pub fn mesh(&self) -> Mesh {
+        if let Some(geometry) = &self.geometry {
+            let (sin, cos) = self.rotation.to_radians().sin_cos();
+            let spans = (0..3).map(|axis| {
+                let low=geometry.vertices.iter().map(|point| point[axis]).fold(f64::INFINITY,f64::min);
+                let high=geometry.vertices.iter().map(|point| point[axis]).fold(f64::NEG_INFINITY,f64::max);
+                let original=high-low;
+                if original < 1e-9 { 1.0 } else { [self.width,self.depth,self.height][axis]/original }
+            }).collect::<Vec<_>>();
+            return Mesh {
+                vertices: geometry.vertices.iter().map(|[x, y, z]| [
+                    self.x + x * spans[0] * cos - y * spans[1] * sin,
+                    self.y + x * spans[0] * sin + y * spans[1] * cos,
+                    self.z + z * spans[2],
+                ]).collect(),
+                faces: geometry.faces.iter().map(|face| face.to_vec()).collect(),
+                cut: false,
+                cap: None,
+            };
+        }
         if let (Some(u),Some(v),Some(profile)) = (self.plane_u,self.plane_v,&self.profile) {
             let normal=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
             let count=profile.points.len();
@@ -342,6 +384,7 @@ impl Object {
     }
 
     pub fn plan(&self, elevation: f64) -> Mesh {
+        if self.shape == Shape::Mesh { return self.mesh(); }
         if self.plane_u.is_some() {
             let mesh=self.mesh();
             if mesh.vertices.iter().all(|point|point[2]>elevation) {
@@ -1044,6 +1087,7 @@ pub fn demo() -> Document {
             material: None,
             container: None,
             profile: None,
+            geometry: None,
             wall_axis: None,
             plane_u: None,
             plane_v: None,
@@ -1157,6 +1201,56 @@ mod tests {
         assert_eq!(restored, sheet);
         sheet.layout.as_mut().unwrap().views[0].mode = "iso".into();
         assert!(!sheet.valid());
+    }
+
+    #[test]
+    fn named_grids_and_grid_dimensions_stay_inside_the_same_view() {
+        let mut sheet = demo().sheet;
+        sheet.layout = Some(SheetLayout {
+            views: vec![SheetView {
+                id: "plan".into(), mode: "plan".into(), x: 14.0, y: 14.0,
+                w: 180.0, h: 110.0, title: "DENAH".into(), grid: false,
+            }],
+            texts: vec![SheetText {
+                id: "room".into(), x: 50.0, y: 50.0, text: "Ruang A".into(),
+                size: 4.0, view_id: Some("plan".into()),
+            }],
+            grid_lines: vec![
+                SheetGridLine { id: "a".into(), view_id: "plan".into(), a: [10.0, 10.0], b: [10.0, 90.0], name: "A".into() },
+                SheetGridLine { id: "b".into(), view_id: "plan".into(), a: [40.0, 10.0], b: [40.0, 90.0], name: "B".into() },
+            ],
+            dimensions: vec![SheetDimension {
+                id: "ab".into(), view_id: "plan".into(), a: [10.0, 10.0], b: [40.0, 10.0],
+                grid_a: Some("a".into()), grid_b: Some("b".into()),
+            }],
+        });
+        assert!(sheet.valid());
+        let restored: Sheet = serde_json::from_value(serde_json::to_value(&sheet).unwrap()).unwrap();
+        assert_eq!(restored, sheet);
+        sheet.layout.as_mut().unwrap().grid_lines[1].view_id = "missing".into();
+        assert!(!sheet.valid());
+    }
+
+    #[test]
+    fn imported_mesh_moves_and_rotates_without_losing_faces() {
+        let mut object = demo().objects.remove(0);
+        object.shape = Shape::Mesh;
+        object.x = 5.0;
+        object.y = 4.0;
+        object.z = 0.0;
+        object.width = 1.0;
+        object.depth = 1.0;
+        object.height = 0.0;
+        object.geometry = Some(Box::new(ImportedGeometry {
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+            faces: vec![[0, 1, 2]],
+        }));
+        assert!(object.valid());
+        assert_eq!(object.mesh().faces, vec![vec![0, 1, 2]]);
+        object.rotation = 90.0;
+        assert!((object.mesh().vertices[1][0] - 5.0).abs() < 1e-6);
+        assert!((object.mesh().vertices[1][1] - 5.0).abs() < 1e-6);
+        assert_eq!(object.plan(1.2).faces.len(), 1);
     }
 
     #[test]

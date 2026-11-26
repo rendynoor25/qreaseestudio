@@ -4,7 +4,7 @@
 type QreaseePoint = [number, number, number];
 type QreaseePoint2 = [number, number];
 type QreaseeView = 'perspective' | 'iso' | 'plan' | 'front' | 'right';
-type QreaseeShape = 'line' | 'rectangle' | 'circle' | 'polygon';
+type QreaseeShape = 'line' | 'rectangle' | 'circle' | 'polygon' | 'mesh';
 type QreaseeMaterial = 'brick' | 'hebel' | 'timber' | 'zinc' | 'clay_tile' |
   'concrete_tile' | 'glass' | 'grass' | 'sand' | 'asphalt' | 'metal' | 'paint';
 type QreaseeTool =
@@ -39,6 +39,7 @@ interface QreaseeObject {
   material?: QreaseeMaterial | null;
   container?: QreaseeMembership | null;
   profile?: QreaseeProfile | null;
+  geometry?: {vertices:QreaseePoint[]; faces:[number,number,number][]} | null;
   wall_axis?: QreaseePoint2 | null;
   plane_u?: QreaseePoint | null;
   plane_v?: QreaseePoint | null;
