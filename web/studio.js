@@ -59,7 +59,7 @@ const tools = {
   circle: ['Lingkaran', 'C', 'Klik pusat, ketik radius, lalu klik arah'],
   pull: ['Push/Pull', 'P', 'Klik bidang, ketik jarak, lalu klik arah atas atau bawah'],
   move: ['Pindah', 'M', 'Pilih objek, klik titik awal, lalu klik titik tujuan; snap tersedia'],
-  rotate: ['Rotate', 'J', 'Tarik mengelilingi pusat objek untuk memutar pada sumbu Z'],
+  rotate: ['Rotate', '', 'Klik pusat rotasi, lalu tentukan sudut; ketik angka lalu Enter untuk presisi'],
   scale: ['Skala', 'S', 'Tarik dari objek untuk mengubah ukurannya secara proporsional'],
   erase: ['Penghapus', 'E', 'Klik objek untuk menghapus; Ctrl+Z untuk mengurungkan'],
   measure: ['Ukur', 'T', 'Tarik antara dua titik untuk membaca jarak pada bidang gambar'],
@@ -82,7 +82,7 @@ const state = {
   doc: null, meshes: [], plans: [], selected: new Set(), inside: null, tool: 'select', layout: false, busy: false,
   snapping: true, inference: null,
   undo: [], redo: [], drag: null, arcPending:null, linePending:null, linePress:null, drawPending:null,
-  movePending:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null
+  movePending:null, rotatePending:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null
 };
 const canvas = $('#viewport');
 const ctx = canvas.getContext('2d');
@@ -151,7 +151,8 @@ let frame = 0;
 for (const [id, [label, key]] of Object.entries(tools)) {
   const button = document.createElement('button');
   button.className = 'icon-button';
-  button.title = label + ' (' + (id==='select'?'Space / V':key) + ')';
+  const shortcut = id==='select' ? 'Space / V' : key;
+  button.title = label + (shortcut ? ' (' + shortcut + ')' : '');
   button.setAttribute('aria-label', label);
   button.dataset.tool = id;
   icon(button, id);
@@ -166,16 +167,19 @@ function setTool(tool) {
     state.linePress=null;
     state.drawPending=null;
     state.movePending=null;
+    state.rotatePending=null;
     state.hoverKey=null;
     if (state.cursor) delete state.cursor.line;
     $('#line-length').value='';
   }
   state.tool = tool;
-  const measured=['line','rectangle','circle','arc','pull'].includes(tool);
+  const measured=['line','rectangle','circle','arc','pull','rotate'].includes(tool);
   $('#line-length-control').hidden=!measured;
-  $('#measure-label').textContent={line:'Panjang',rectangle:'X × Y',circle:'Radius',arc:'Radius, sudut',pull:'Jarak'}[tool]||'Ukuran';
-  $('#line-length').placeholder={rectangle:'2 x 3',arc:'2, 90'}[tool]||'0';
+  $('#measure-label').textContent={line:'Panjang',rectangle:'X × Y',circle:'Radius',arc:'Radius, sudut',pull:'Jarak',rotate:'Sudut'}[tool]||'Ukuran';
+  $('#line-length').placeholder={rectangle:'2 x 3',arc:'2, 90',rotate:'30'}[tool]||'0';
   $('#line-length').inputMode=tool==='rectangle'||tool==='arc'?'text':'decimal';
+  $('#line-length').min=tool==='rotate'?'-360':'0.001';
+  $('#line-unit').textContent=tool==='rotate'?'°':displayUnit;
   $('#measure-preview').textContent='';
   $('#tool-hint').textContent = tools[tool][2];
   canvas.dataset.tool = tool;
@@ -288,6 +292,10 @@ const lengthLabel=value=>displayLength(value)+' '+displayUnit;
 function measurement(tool=state.tool) {
   const raw=$('#line-length').value.trim();
   if (!raw) return null;
+  if (tool==='rotate') {
+    const angle=Number(raw.replace(',','.'));
+    return Number.isFinite(angle)?{primary:angle}:{invalid:true};
+  }
   const pair=tool==='rectangle' || tool==='arc';
   const parts=pair ? raw.split(/\s*[xX,;]\s*|\s+/).filter(Boolean) : [raw.replace(',','.')];
   const first=Number(parts[0]),second=Number(parts[1]);
@@ -299,7 +307,8 @@ function measurement(tool=state.tool) {
     secondary:tool==='rectangle'?second/unitFactors[displayUnit]:tool==='arc'?(parts.length===2?second:90):undefined};
 }
 function measurementError() {
-  showStatus(state.tool==='rectangle'?'Masukkan X × Y, misalnya 2 x 3.':
+  showStatus(state.tool==='rotate'?'Masukkan sudut, misalnya 30 atau -45.':
+    state.tool==='rectangle'?'Masukkan X × Y, misalnya 2 x 3.':
     state.tool==='arc'?'Masukkan radius atau radius, sudut (misalnya 2, 90).':'Masukkan ukuran positif.');
 }
 function updateCoordinates() {
@@ -382,6 +391,12 @@ function applyLineLength() {
   showStatus('Ukuran siap. Klik arah di kanvas untuk membuat objek.');
 }
 $('#line-length').addEventListener('input',()=>{
+  if (state.rotatePending) {
+    const size=measurement('rotate');
+    if (size && !size.invalid) updateRotatePreview(state.rotatePending,size.primary);
+    redraw();
+    return;
+  }
   if (state.linePending?.raw) {
     const pending=state.linePending,size=measurement('line');
     pending.b=size && !size.invalid
@@ -406,11 +421,13 @@ $('#line-length').addEventListener('input',()=>{
 $('#line-length').addEventListener('keydown',event=>{
   if (event.key==='Enter') {
     event.preventDefault();
-    applyLineLength();
+    if (state.rotatePending) applyRotateValue();
+    else applyLineLength();
   } else if (event.key==='Escape') {
     event.preventDefault();
     $('#line-length').value='';
     state.drawPending=null;
+    state.rotatePending=null;
     if (state.linePending) finishLine();
     setTool('select');
     canvas.focus({preventScroll:true});
@@ -454,7 +471,8 @@ function mode(layout) {
   state.linePress = null;
   state.drawPending = null;
   state.movePending = null;
-  $('#line-length-control').hidden=layout || !['line','rectangle','circle','arc','pull'].includes(state.tool);
+  state.rotatePending = null;
+  $('#line-length-control').hidden=layout || !['line','rectangle','circle','arc','pull','rotate'].includes(state.tool);
   $('#line-length').value='';
   for (const id of ['stage','tree','inspector']) {
     $('#model-' + id).hidden = layout;
@@ -513,7 +531,8 @@ async function openRoom(createBlank) {
   state.linePress = null;
   state.drawPending = null;
   state.movePending = null;
-  $('#line-length-control').hidden=state.layout || !['line','rectangle','circle','arc','pull'].includes(state.tool);
+  state.rotatePending = null;
+  $('#line-length-control').hidden=state.layout || !['line','rectangle','circle','arc','pull','rotate'].includes(state.tool);
   $('#line-length').value='';
   state.undo = [];
   state.redo = [];
@@ -837,6 +856,7 @@ function renderTree() {
 
 function select(id, additive=false) {
   if (state.movePending) {state.movePending=null;state.inference=null;}
+  if (state.rotatePending) {state.rotatePending=null;state.inference=null;}
   if (!additive && state.selected.size===1 && state.selected.has(id)) return;
   if (!additive) {
     state.selected.clear();
@@ -943,6 +963,49 @@ function moveDestination(point,pending) {
   return infer(point,pending.z,pending.excluded)
     || infer(point,undefined,pending.excluded)
     || drawingPoint(point,pending.z,pending.excluded);
+}
+
+const normalizeAngle = value => ((value+180)%360+360)%360-180;
+/** @param {QreaseeObject} object @param {QreaseePoint} pivot @param {number} angle @returns {QreaseeObject} */
+function rotateObject(object,pivot,angle) {
+  const rad=angle*Math.PI/180,cos=Math.cos(rad),sin=Math.sin(rad);
+  const dx=object.x-pivot[0],dy=object.y-pivot[1];
+  return {...object,x:pivot[0]+dx*cos-dy*sin,y:pivot[1]+dx*sin+dy*cos,
+    rotation:normalizeAngle(object.rotation+angle)};
+}
+
+function updateRotatePreview(pending,angle) {
+  pending.angle=angle;
+  pending.updates=pending.sources.map(object=>rotateObject(object,pending.pivot,angle));
+  if (document.activeElement!==$('#line-length'))
+    $('#line-length').value=Number(angle.toFixed(2));
+}
+
+function commitRotate(pending) {
+  if (!pending || !Number.isFinite(pending.angle) || Math.abs(pending.angle)<.001) {
+    showStatus('Sudut rotasi masih 0°. Gerakkan kursor atau ketik sudut.');
+    return;
+  }
+  const updates=pending.updates || pending.sources.map(object=>rotateObject(object,pending.pivot,pending.angle));
+  const selection=[...state.selected];
+  const angle=pending.angle;
+  state.rotatePending=null;
+  state.inference=null;
+  $('#line-length').value='';
+  batch(pending.sources,updates,selection).then(rotated=>{
+    if (rotated) showStatus('Rotasi '+angle.toFixed(1)+'° diterapkan.');
+  });
+  redraw();
+}
+
+function applyRotateValue() {
+  const pending=state.rotatePending;
+  if (!pending) {showStatus('Tentukan pusat rotasi terlebih dahulu.');return;}
+  const size=measurement('rotate');
+  if (!size || size.invalid) {measurementError();return;}
+  updateRotatePreview(pending,size.primary);
+  $('#line-length').value=String(size.primary);
+  commitRotate(pending);
 }
 
 $('#search').onfocus=()=>panel('objects',true);
@@ -1818,7 +1881,7 @@ function draw() {
   const pending = state.drawPending;
   if (state.doc) {
     let meshes = state.meshes, objects = state.doc.objects;
-    const updates=drag?.updates || pending?.updates || state.movePending?.updates;
+    const updates=drag?.updates || pending?.updates || state.movePending?.updates || state.rotatePending?.updates;
     if (updates) {
       const preview=new Map(updates.map(object=>[object.id,object]));
       meshes=objects.map((object,i)=>preview.has(object.id)?previewMesh(preview.get(object.id)):meshes[i]);
@@ -1891,6 +1954,20 @@ function draw() {
         ctx.beginPath();ctx.arc(x,y,3.5,0,Math.PI*2);
         ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#c87936';ctx.lineWidth=1.5;ctx.stroke();
       }
+    }
+  }
+  if (state.rotatePending) {
+    const pivot=stagePoint(state.rotatePending.pivot);
+    if (Number.isFinite(pivot[0])) {
+      if (state.rotatePending.destination) {
+        const end=stagePoint(state.rotatePending.destination);
+        if (Number.isFinite(end[0])) strokeLine(pivot,end,'#c87936',1.3);
+      }
+      ctx.beginPath();ctx.arc(pivot[0],pivot[1],42,0,Math.PI*2);
+      ctx.setLineDash([4,4]);ctx.strokeStyle='#c8793688';ctx.lineWidth=1;ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();ctx.arc(pivot[0],pivot[1],4,0,Math.PI*2);
+      ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#c87936';ctx.lineWidth=1.6;ctx.stroke();
     }
   }
   const arcPreview=pending?.previewArc || (drag?.tool==='arc' && drag.end ? [drag.initial,drag.end] : state.arcPending?.preview);
@@ -2547,6 +2624,30 @@ canvas.addEventListener('pointerdown',event=>{
       redraw();
       return;
     }
+    if (tool==='rotate') {
+      if (state.rotatePending) {
+        const pending=state.rotatePending;
+        const destination=moveDestination(start,pending);
+        if (!destination) {showStatus('Arahkan kursor pada bidang untuk menentukan sudut.');return;}
+        let angle=Math.atan2(destination.world[1]-pending.pivot[1],
+          destination.world[0]-pending.pivot[0])*180/Math.PI;
+        angle=state.snapping?snap(angle,5):round(angle);
+        updateRotatePreview(pending,angle);
+        commitRotate(pending);
+        return;
+      }
+      const sources=moveSources();
+      if (!sources.length) {showStatus('Pilih objek terlebih dahulu, lalu klik pusat rotasi.');return;}
+      const hit=infer(start,undefined) || drawingPoint(start);
+      if (!hit) {showStatus('Tentukan pusat rotasi pada bidang yang terlihat.');return;}
+      state.rotatePending={sources,pivot:hit.world,z:hit.world[2],
+        excluded:new Set(sources.map(object=>object.id)),angle:0,updates:null};
+      state.inference=hit.label?hit:null;
+      $('#line-length').value='';
+      showStatus('Pusat rotasi ditetapkan. Gerakkan kursor atau ketik sudut lalu Enter.');
+      redraw();
+      return;
+    }
     const object=face?.object;
     if (tool==='erase') {
       if (object) { select(targetId(object)); removeObject(); }
@@ -2584,23 +2685,6 @@ canvas.addEventListener('pointerdown',event=>{
       if (!radius || radius<.01) { showStatus('Mulai tarik di luar pusat objek.'); return; }
       select(id);
       state.drag={tool,start,object,sources,pivot,radius,elevation:object.z};
-    } else if (tool==='rotate') {
-      const id=targetId(object);
-      const group=members(id);
-      const sources=group.length?group:object?[object]:[];
-      if (!sources.length || (group.length && group[0].container.definition)) {
-        showStatus('Pilih objek atau Group. Untuk Component, gunakan Edit isi.');
-        return;
-      }
-      const midpoint=key=>sources.reduce((sum,item)=>sum+item[key],0)/sources.length;
-      const pivot=[midpoint('x'),midpoint('y'),face.top?object.z+object.height:object.z];
-      const initial=ground(start,pivot[2]);
-      if (!initial || Math.hypot(initial[0]-pivot[0],initial[1]-pivot[1])<.01) {
-        showStatus('Putar dari titik di luar pusat objek pada denah atau tampilan 3D.');
-        return;
-      }
-      select(id);
-      state.drag={tool,start,object,sources,pivot,initial:Math.atan2(initial[1]-pivot[1],initial[0]-pivot[0])};
     } else if (tool==='pull') {
       if (!object || (!face.top && !object.wall_axis && !object.plane_u)) {
         showStatus('Pilih bidang yang akan ditarik.');
@@ -2668,6 +2752,21 @@ canvas.addEventListener('pointermove',event=>{
       const destination=moveDestination(point,pending);
       pending.destination=destination?.world||null;
       pending.updates=destination?movePreview(pending.sources,pending.start,destination.world):null;
+      state.inference=destination?.label?destination:null;
+      redraw();
+      return;
+    }
+    if (state.rotatePending) {
+      const pending=state.rotatePending;
+      const destination=moveDestination(point,pending);
+      pending.destination=destination?.world||null;
+      if (destination && document.activeElement!==$('#line-length')) {
+        let angle=Math.atan2(destination.world[1]-pending.pivot[1],
+          destination.world[0]-pending.pivot[0])*180/Math.PI;
+        angle=state.snapping?snap(angle,5):round(angle);
+        updateRotatePreview(pending,angle);
+        showStatus('Sudut '+angle.toFixed(1)+'°');
+      } else if (!destination) pending.updates=null;
       state.inference=destination?.label?destination:null;
       redraw();
       return;
@@ -2892,6 +2991,7 @@ window.addEventListener('keydown',event=>{
     if (state.arcPending) {state.arcPending=null;state.inference=null;setTool('select');redraw();return;}
     if (state.drawPending) {state.drawPending=null;state.inference=null;setTool('select');redraw();return;}
     if (state.movePending) {state.movePending=null;state.inference=null;setTool('select');redraw();return;}
+    if (state.rotatePending) {state.rotatePending=null;state.inference=null;setTool('select');redraw();return;}
     if (state.linePending) {finishLine();setTool('select');return;}
     if (typing) return;
     if (state.inside) {exitContainer();return;}
@@ -2909,9 +3009,11 @@ window.addEventListener('keydown',event=>{
     return;
   }
   if (buttonFocus) return;
-  if (['line','rectangle','circle','arc','pull'].includes(state.tool) && !state.layout &&
+  if ((['line','rectangle','circle','arc','pull'].includes(state.tool) ||
+      (state.tool==='rotate'&&state.rotatePending)) && !state.layout &&
       !event.ctrlKey && !event.metaKey && !event.altKey) {
-    if (/^[0-9.,;xX.]$/.test(event.key)) {
+    const pattern=state.tool==='rotate'?/^[0-9.\-]$/:/^[0-9.,;xX.]$/;
+    if (pattern.test(event.key)) {
       event.preventDefault();
       const input=$('#line-length');
       input.focus({preventScroll:true});
