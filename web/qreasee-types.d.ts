@@ -263,6 +263,7 @@ interface QreaseeState {
   offsetPending: any;
   measurePending: any;
   sectionPending: any;
+  sectionHover: any;
   hits: QreaseeHit[];
   hoverKey: string | null;
   epoch: number;

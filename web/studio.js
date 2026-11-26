@@ -91,7 +91,7 @@ const state = {
   doc: null, meshes: [], plans: [], selected: new Set(), inside: null, tool: 'select', layout: false, busy: false,
   snapping: true, inference: null,
   undo: [], redo: [], drag: null, arcPending:null, linePending:null, linePress:null, drawPending:null,
-  movePending:null, rotatePending:null, offsetPending:null, measurePending:null, sectionPending:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null, canManageShare:true, shareRole:'edit', showHidden:false
+  movePending:null, rotatePending:null, offsetPending:null, measurePending:null, sectionPending:null, sectionHover:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null, canManageShare:true, shareRole:'edit', showHidden:false
 };
 const canvas = $('#viewport');
 const ctx = canvas.getContext('2d');
@@ -246,6 +246,7 @@ function setTool(tool) {
     state.offsetPending=null;
     state.measurePending=null;
     state.sectionPending=null;
+    state.sectionHover=null;
     state.hoverKey=null;
     if (state.cursor) delete state.cursor.line;
     $('#line-length').value='';
@@ -707,6 +708,7 @@ async function openRoom(createBlank) {
   state.offsetPending = null;
   state.measurePending = null;
   state.sectionPending = null;
+  state.sectionHover = null;
   activeCommentTarget=null;
   activeSectionId=null;
   closeCommentComposer();
@@ -1634,16 +1636,45 @@ function placeSectionAt(start) {
   redraw();
 }
 
+/** @param {QreaseePoint} worldOrigin @param {QreaseePoint} normal @param {string} color @param {number} alpha @param {number=} shaft @param {number=} offset */
+function drawSectionNormalArrow(worldOrigin,normal,color,alpha,shaft=30,offset=6) {
+  const unit=normalizePoint(normal);
+  const base=stagePoint(worldOrigin);
+  const tip=stagePoint([worldOrigin[0]-unit[0]*.8,worldOrigin[1]-unit[1]*.8,
+    worldOrigin[2]-unit[2]*.8]);
+  if (!Number.isFinite(base[0])||!Number.isFinite(tip[0])) return;
+  const direction=[tip[0]-base[0],tip[1]-base[1]];
+  const length=Math.hypot(...direction);
+  if (length<2.5) return;
+  const dx=direction[0]/length,dy=direction[1]/length;
+  const start=[base[0]+dx*offset,base[1]+dy*offset];
+  const end=[start[0]+dx*shaft,start[1]+dy*shaft];
+  ctx.save();
+  ctx.globalAlpha=alpha;
+  ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=2;ctx.lineCap='round';
+  ctx.beginPath();ctx.moveTo(start[0],start[1]);ctx.lineTo(end[0],end[1]);ctx.stroke();
+  const side=[-dy,dx];
+  ctx.beginPath();
+  ctx.moveTo(end[0]+dx*7,end[1]+dy*7);
+  ctx.lineTo(end[0]+side[0]*4.5,end[1]+side[1]*4.5);
+  ctx.lineTo(end[0]-side[0]*4.5,end[1]-side[1]*4.5);
+  ctx.closePath();ctx.fill();
+  ctx.restore();
+}
+
 function drawSectionPlanes() {
   const list=[...activeSections(),
     ...(state.showHidden?sectionPlanes().filter(section=>section.hidden):[])];
   sectionQuads=[];
+  if (state.sectionHover && !state.sectionPending)
+    drawSectionNormalArrow(state.sectionHover.origin,state.sectionHover.normal,'#e8932a',.9,44,10);
   if (!list.length) return;
   ctx.save();
   ctx.setLineDash([7,5]);
   ctx.lineWidth=1.5;
   for (const section of list) {
-    const quad=sectionQuad(section).map(stagePoint);
+    const worldQuad=sectionQuad(section);
+    const quad=worldQuad.map(stagePoint);
     if (quad.some(point=>!Number.isFinite(point[0]))) continue;
     ctx.strokeStyle=section.id==='__preview__'?'#e8a24d':
       section.hidden?'#e8932a':
@@ -1656,32 +1687,11 @@ function drawSectionPlanes() {
       ctx.fillStyle='#fffaf2';ctx.fill();
       ctx.strokeStyle='#d6842a';ctx.lineWidth=1.7;ctx.stroke();
     }
-    const center=quad.reduce((sum,point)=>[sum[0]+point[0]/quad.length,
-      sum[1]+point[1]/quad.length],[0,0]);
-    const tip=stagePoint([section.origin[0]-normalizePoint(section.normal)[0]*1.5,
-      section.origin[1]-normalizePoint(section.normal)[1]*1.5,
-      section.origin[2]-normalizePoint(section.normal)[2]*1.5]);
-    let direction=[tip[0]-center[0],tip[1]-center[1]];
-    const length=Math.hypot(...direction);
-    if (length<4) direction=[0,1]; else direction=direction.map(value=>value/length);
-    const drawArrow=(x,y,alpha)=>{
-      const end=[x+direction[0]*31,y+direction[1]*31];
-      ctx.save();ctx.globalAlpha=alpha;ctx.strokeStyle='#e8932a';ctx.fillStyle='#e8932a';
-      ctx.lineWidth=2;ctx.lineCap='round';
-      ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(end[0],end[1]);ctx.stroke();
-      const side=[-direction[1],direction[0]];
-      ctx.beginPath();
-      ctx.moveTo(end[0]+direction[0]*7,end[1]+direction[1]*7);
-      ctx.lineTo(end[0]+side[0]*4.5,end[1]+side[1]*4.5);
-      ctx.lineTo(end[0]-side[0]*4.5,end[1]-side[1]*4.5);
-      ctx.closePath();ctx.fill();
-      ctx.restore();
-    };
-    if (section.id!=='__preview__') {
-      const alpha=activeSectionId===section.id?1:.62;
-      for (const point of quad) drawArrow(point[0]+direction[0]*7,point[1]+direction[1]*7,alpha);
+    const alpha=section.id==='__preview__'?.9:activeSectionId===section.id?1:.62;
+    for (const corner of worldQuad)
+      drawSectionNormalArrow(corner,section.normal,'#e8932a',alpha,28,6);
+    if (section.id!=='__preview__')
       sectionQuads.push({id:section.id,quad:quad.map(point=>[point[0],point[1]]),section});
-    } else drawArrow(center[0]+direction[0]*8,center[1]+direction[1]*8,.9);
     ctx.setLineDash([7,5]);
   }
   ctx.restore();
@@ -5146,6 +5156,14 @@ canvas.addEventListener('pointermove',event=>{
       const id=targetId(hovered);
       const owned=new Set(members(id).length?members(id).map(item=>item.id):hovered?[hovered.id]:[]);
       state.inference=owned.size ? infer(point,undefined,new Set(objects().filter(item=>!owned.has(item.id)).map(item=>item.id))) : null;
+    } else if (state.tool==='section') {
+      const face=pickFace(point,false);
+      const normal=face?faceNormal(face.world):null;
+      state.sectionHover=face&&normal&&face.world.length>=3
+        ? {origin:face.world.reduce((sum,vertex)=>sum.map((value,index)=>value+vertex[index]/
+          face.world.length),[0,0,0]),normal}
+        : null;
+      state.inference=null;
     } else {
       const hit=['line','rectangle','circle','measure'].includes(state.tool) ? drawingPoint(point) : null;
       state.inference=hit?.label?hit:null;
@@ -5260,7 +5278,7 @@ canvas.addEventListener('pointermove',event=>{
   }
   redraw();
 });
-canvas.addEventListener('pointerleave',()=>{if (!state.layout) state.cursor=null;state.hoverKey=null;hoverGridId=null;state.inference=null;redraw();});
+canvas.addEventListener('pointerleave',()=>{if (!state.layout) state.cursor=null;state.hoverKey=null;state.sectionHover=null;hoverGridId=null;state.inference=null;redraw();});
 canvas.addEventListener('dblclick',event=>{
   if (state.tool==='line' && state.linePending) { finishLine(); return; }
   if (!['select','bucket'].includes(state.tool)) return;
