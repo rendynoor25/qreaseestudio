@@ -105,6 +105,7 @@
       <div id="model-tree">
         <button class="tree-root" id="tree-toggle" aria-expanded="false" aria-controls="objects"><span data-icon="vchevron"></span><span data-icon="folder"></span> <strong>Objek model</strong><span id="object-count"></span></button>
         <div id="objects" hidden></div>
+        <div class="model-grid-browser"><div class="model-grid-heading"><strong>Grid datum</strong><span id="model-grid-count">0</span></div><div id="model-grids"></div></div>
       </div>
       <div id="layout-tree" hidden>
         <div class="sheet-item"><span data-icon="page"></span><div><b id="sheet-code">A-101</b><small>Lembar arsitektur</small></div></div>
@@ -168,7 +169,7 @@
             <button draggable="true" data-view-mode="iso" type="button">Aksonometri</button>
           </div>
           <div id="layout-view-tools" class="layout-view-tools" hidden><h2>Alat dalam view</h2><p class="layout-side-hint">Grid: klik kepala, lalu ekor. Dimensi: klik dua batang grid.</p><div class="layout-tool-list"><button type="button" class="layout-tool active" data-layout-tool="select">Pilih</button><button type="button" class="layout-tool" data-layout-tool="grid">Grid</button><button type="button" class="layout-tool" data-layout-tool="dimension">Dimensi</button><button type="button" class="layout-tool" data-layout-tool="text">Teks</button></div></div>
-          <div id="layout-selection" class="layout-selection" hidden><h2>Item terpilih</h2><label id="layout-view-title-row">Judul view<input id="layout-view-title" maxlength="80"></label><label id="layout-grid-name-row" hidden>Nama grid<input id="layout-grid-name" maxlength="12"></label><label id="layout-text-row" hidden>Teks<textarea id="layout-text-value" rows="3" maxlength="150"></textarea></label><button id="layout-delete" type="button">Hapus dari lembar</button></div>
+          <div id="layout-selection" class="layout-selection" hidden><h2>Item terpilih</h2><label id="layout-view-title-row">Judul view<input id="layout-view-title" maxlength="80"></label><label id="layout-grid-name-row" hidden>Nama grid<input id="layout-grid-name" maxlength="12"></label><button id="layout-grid-visibility" type="button" hidden>Sembunyikan grid</button><label id="layout-text-row" hidden>Teks<textarea id="layout-text-value" rows="3" maxlength="150"></textarea></label><button id="layout-delete" type="button">Hapus dari lembar</button></div>
           <details class="layout-title-details" open><summary>Title block</summary><div id="layout-side-properties"></div></details>
         </aside>
       </div>

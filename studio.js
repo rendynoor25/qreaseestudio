@@ -680,6 +680,7 @@ function rememberProject() {
 
 async function openRoom(createBlank) {
   const epoch = ++state.epoch;
+  selectedGridId=null;
   if (window.qreaseeAuth) {
     const session = await window.qreaseeAuth.ready;
     if (state.epoch !== epoch || !session) return;
@@ -985,6 +986,7 @@ function refresh(force = false) {
     $('#revision').textContent = 'Revisi ' + doc.revision;
   }
   if (state.inside && !members(state.inside).length) state.inside=null;
+  if(selectedGridId&&!grids().some(grid=>grid.id===selectedGridId))selectedGridId=null;
   const valid=new Set(objects().map(targetId));
   state.selected=new Set([...state.selected].filter(id=>valid.has(id)));
   refreshButtons();
@@ -2324,6 +2326,7 @@ window.addEventListener('pointerdown',event=>{
 });
 
 function renderTree() {
+  renderModelGridList();
   const match = $('#search').value.trim().toLowerCase();
   const objects = state.doc?.objects || [];
   const list = $('#objects');
@@ -2383,7 +2386,61 @@ function renderTree() {
   list.scrollTop = scroll;
 }
 
+function renderModelGridList() {
+  const list=$('#model-grids');
+  const items=grids().filter(grid=>grid.name.toLowerCase().includes($('#search').value.trim().toLowerCase()));
+  $('#model-grid-count').textContent=String(grids().length);
+  list.replaceChildren();
+  for(const grid of items){
+    const row=document.createElement('div');
+    row.className='model-grid-row'+(selectedGridId===grid.id?' selected':'')+(grid.hidden?' hidden-grid':'');
+    const selectButton=document.createElement('button');
+    selectButton.type='button';selectButton.className='grid-select';
+    selectButton.textContent='▦  '+grid.name;
+    selectButton.title='Pilih grid '+grid.name;
+    selectButton.onclick=()=>selectModelGrid(grid.id);
+    const action=(label,title,click)=>{const button=document.createElement('button');
+      button.type='button';button.className='grid-action';button.textContent=label;button.title=title;
+      button.setAttribute('aria-label',title+' '+grid.name);button.disabled=!canEditModel();button.onclick=click;return button;};
+    row.append(selectButton,
+      action(grid.hidden?'◉':'◌',grid.hidden?'Tampilkan':'Sembunyikan',()=>updateGrid(grid.id,{hidden:!grid.hidden})),
+      action('✎','Ganti nama',()=>{const name=prompt('Nama grid:',grid.name)?.trim();if(name)renameGrid(grid.id,name);} ),
+      action('×','Hapus',()=>removeGrid(grid.id)));
+    list.append(row);
+  }
+}
+function selectModelGrid(id) {
+  selectedGridId=id;
+  state.selected.clear();
+  renderTree();redraw();
+  const grid=grids().find(item=>item.id===id);
+  if(grid)showStatus(grid.hidden?'Grid '+grid.name+' tersembunyi. Pilih Tampilkan untuk melihatnya.':
+    'Grid '+grid.name+' dipilih. Bidang datumnya terlihat di model.');
+}
+function updateGrid(id,changes) {
+  if(!canEditModel())return;
+  const layout=sheetLayout();
+  saveSheetLayout({...layout,gridLines:grids().map(grid=>grid.id===id?{...grid,...changes}:grid)});
+}
+function renameGrid(id,name) {
+  const trimmed=name.trim().slice(0,12);
+  if(!trimmed)return;
+  if(grids().some(grid=>grid.id!==id&&grid.name.toUpperCase()===trimmed.toUpperCase())){
+    showStatus('Nama grid sudah digunakan.');return;
+  }
+  updateGrid(id,{name:trimmed});
+}
+function removeGrid(id) {
+  if(!canEditModel())return;
+  const layout=sheetLayout();
+  if(selectedGridId===id)selectedGridId=null;
+  if(layoutSelected?.kind==='grid'&&layoutSelected.id===id){layoutSelected=null;$('#layout-selection').hidden=true;}
+  saveSheetLayout({...layout,gridLines:grids().filter(grid=>grid.id!==id),
+    dimensions:layout.dimensions.filter(item=>item.gridA!==id&&item.gridB!==id)});
+}
+
 function select(id, additive=false) {
+  if(!additive)selectedGridId=null;
   activeSectionId=null;
   if (state.movePending) {state.movePending=null;state.inference=null;}
   if (state.rotatePending) {state.rotatePending=null;state.inference=null;}
@@ -3948,6 +4005,7 @@ function draw() {
       if (!face.smooth && !face.quiet) ctx.stroke();
     }
     drawSectionPlanes();
+    drawModelGrids();
   } else state.hits = [];
   if (state.drag?.tool==='erase' && state.drag.seen?.size) {
     for (const face of state.hits) {
@@ -4617,6 +4675,8 @@ canvas.addEventListener('pointerdown',event=>{
   if (event.button===0 && tool==='select') {
     const pin=commentPinAt(start);
     if (pin) {focusCommentTarget(pin.target);return;}
+    const grid=modelGridAt(start);
+    if(grid){selectModelGrid(grid.id);return;}
   }
   if (event.button===0 && ['select','section'].includes(tool) && !state.sectionPending) {
     const section=sectionPlaneAt(start);
@@ -4899,8 +4959,10 @@ canvas.addEventListener('pointerdown',event=>{
 
 canvas.addEventListener('pointermove',event=>{
   const point=pointer(event);
+  const gridHover=!state.drag&&state.tool==='select'?modelGridAt(point):null;
+  if(hoverGridId!==gridHover?.id){hoverGridId=gridHover?.id||null;redraw();}
   if (!state.drag && state.tool==='select')
-    canvas.style.cursor=commentPinAt(point)?'pointer':'';
+    canvas.style.cursor=commentPinAt(point)||gridHover?'pointer':'';
   const onGround=ground(point);
   state.cursor=onGround?{mode:'model',x:round(onGround[0]),y:round(onGround[1]),z:0}:null;
   updateCoordinates();
@@ -4912,7 +4974,7 @@ canvas.addEventListener('pointermove',event=>{
     drag=state.drag;
   }
   if (!drag && state.tool==='select' && !state.drawPending) {
-    const hovered=pickFace(point,false);
+    const hovered=gridHover?null:pickFace(point,false);
     state.hoverKey=hovered ? (hovered.smooth ? hovered.object.id : hovered.key) : null;
   } else state.hoverKey=null;
   if (!drag) {
@@ -5155,7 +5217,7 @@ canvas.addEventListener('pointermove',event=>{
   }
   redraw();
 });
-canvas.addEventListener('pointerleave',()=>{if (!state.layout) state.cursor=null;state.hoverKey=null;state.inference=null;redraw();});
+canvas.addEventListener('pointerleave',()=>{if (!state.layout) state.cursor=null;state.hoverKey=null;hoverGridId=null;state.inference=null;redraw();});
 canvas.addEventListener('dblclick',event=>{
   if (state.tool==='line' && state.linePending) { finishLine(); return; }
   if (!['select','bucket'].includes(state.tool)) return;
@@ -5360,7 +5422,142 @@ const layoutDefaults=()=>({
 const sheetLayout=()=>state.doc?.sheet.layout || layoutDefaults();
 let layoutTool='select',layoutSelected=null,layoutDrag=null,layoutDimensionStart=null;
 let layoutActiveViewId=null,layoutGridPending=null,layoutGridHover=null;
+let selectedGridId=null,hoverGridId=null;
 let layoutZoom=1;
+const grids=()=>sheetLayout().gridLines||[];
+let gridProjectionCache={meshes:null,plans:null,scale:null,entries:new Map()};
+function nextGridName() {
+  const taken=new Set(grids().map(grid=>grid.name.toUpperCase()));
+  const last=grids().at(-1)?.name?.trim().toUpperCase()||'';
+  const nextAlpha=name=>{
+    let value=0;
+    for(const letter of name)value=value*26+letter.charCodeAt(0)-64;
+    value++;
+    let result='';
+    while(value){value--;result=String.fromCharCode(65+value%26)+result;value=Math.floor(value/26);}
+    return result;
+  };
+  let candidate=/^\d+$/.test(last)?String(Number(last)+1):/^[A-Z]+$/.test(last)?nextAlpha(last):'A';
+  while(taken.has(candidate)) candidate=/^\d+$/.test(candidate)?String(Number(candidate)+1):nextAlpha(candidate);
+  return candidate;
+}
+function layoutProjection(view) {
+  const scale=state.doc?.sheet.scale;
+  if(gridProjectionCache.meshes!==state.meshes||gridProjectionCache.plans!==state.plans||gridProjectionCache.scale!==scale){
+    gridProjectionCache={meshes:state.meshes,plans:state.plans,scale,entries:new Map()};
+  }
+  const key=[view.id,view.mode,view.x,view.y,view.w,view.h].join(':');
+  if(gridProjectionCache.entries.has(key))return gridProjectionCache.entries.get(key);
+  const raw=basis(views[view.mode][0],views[view.mode][1]);
+  const meshes=view.mode==='plan'?state.plans:state.meshes;
+  const points=meshes.flatMap(mesh=>mesh.vertices.map(raw));
+  const {min,max}=points.length?bounds(points):{min:[-5,-5,-1],max:[5,5,3]};
+  const spanX=Math.max(.05,max[0]-min[0]),spanY=Math.max(.05,max[1]-min[1]);
+  const usableH=view.h-(view.mode==='plan'?35:19);
+  const factor=view.mode==='iso'?Math.min((view.w-20)/spanX,usableH/spanY):1000/state.doc.sheet.scale;
+  const center=[view.x+view.w/2,view.y+7+usableH/2];
+  const project=world=>{const [a,b]=raw(world);return [
+    center[0]+(a-(min[0]+max[0])/2)*factor-view.x,
+    center[1]+(b-(min[1]+max[1])/2)*factor-view.y];};
+  const unprojectX=localX=>(view.x+localX-center[0])/factor+(min[0]+max[0])/2;
+  const unprojectY=localY=>(view.y+localY-center[1])/factor+(min[1]+max[1])/2;
+  const result={project,unprojectX,unprojectY,factor};
+  gridProjectionCache.entries.set(key,result);
+  return result;
+}
+function gridWorldFromLocal(view,a,b) {
+  const projection=layoutProjection(view);
+  if(view.mode==='plan')return [
+    [projection.unprojectX(a[0]),-projection.unprojectY(a[1])],
+    [projection.unprojectX(b[0]),-projection.unprojectY(b[1])]];
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  for(const mesh of state.meshes)for(const point of mesh.vertices){
+    minX=Math.min(minX,point[0]);maxX=Math.max(maxX,point[0]);
+    minY=Math.min(minY,point[1]);maxY=Math.max(maxY,point[1]);
+  }
+  if(!Number.isFinite(minX)){minX=minY=-5;maxX=maxY=5;}
+  else {minX-=1;minY-=1;maxX+=1;maxY+=1;}
+  const coordinate=projection.unprojectX((a[0]+b[0])/2);
+  if(view.mode==='front')return [[coordinate,minY],[coordinate,maxY]];
+  if(view.mode==='right')return [[minX,coordinate],[maxX,coordinate]];
+  return null;
+}
+function gridWorldEndpoints(grid) {
+  if(grid.worldA&&grid.worldB)return [grid.worldA,grid.worldB];
+  const view=sheetLayout().views.find(item=>item.id===grid.viewId);
+  return view?gridWorldFromLocal(view,grid.a,grid.b):null;
+}
+function gridBaseSegment(grid,view) {
+  if(grid.hidden||view.mode==='iso')return null;
+  if(grid.viewId===view.id&&!grid.worldA)return [grid.a,grid.b];
+  const world=gridWorldEndpoints(grid);
+  if(!world)return null;
+  const projection=layoutProjection(view);
+  if(view.mode==='plan')return world.map(([x,y])=>projection.project([x,y,0]));
+  if(view.mode==='front'&&Math.abs(world[0][0]-world[1][0])<.05){
+    const x=projection.project([world[0][0],0,0])[0];
+    return [[x,5],[x,view.h-15]];
+  }
+  if(view.mode==='right'&&Math.abs(world[0][1]-world[1][1])<.05){
+    const x=projection.project([0,world[0][1],0])[0];
+    return [[x,5],[x,view.h-15]];
+  }
+  return null;
+}
+function gridSegment(grid,view) {
+  const segment=gridBaseSegment(grid,view);
+  if(!segment)return null;
+  if(layoutDrag?.kind==='grid'&&layoutDrag.id===grid.id&&layoutDrag.viewId===view.id)
+    return segment.map(([x,y])=>[x+layoutDrag.dx,y+layoutDrag.dy]);
+  return segment;
+}
+function modelGridHeight() {
+  let low=Infinity,high=-Infinity;
+  for(const mesh of state.meshes)for(const point of mesh.vertices){low=Math.min(low,point[2]);high=Math.max(high,point[2]);}
+  return Number.isFinite(low)?[low-.3,high+.5]:[0,3];
+}
+function modelGridScreenLine(grid,z=modelGridHeight()[0]) {
+  const world=gridWorldEndpoints(grid);
+  if(!world)return null;
+  const points=world.map(([x,y])=>stagePoint([x,y,z]));
+  return points.every(point=>point.slice(0,2).every(Number.isFinite))?points:null;
+}
+function modelGridAt(point) {
+  let best=null,distance=9;
+  const bottom=modelGridHeight()[0];
+  for(const grid of grids()){
+    if(grid.hidden)continue;
+    const segment=modelGridScreenLine(grid,bottom);
+    if(!segment)continue;
+    const [a,b]=segment,dx=b[0]-a[0],dy=b[1]-a[1],length=dx*dx+dy*dy;
+    const t=length>1e-9?clamp(((point[0]-a[0])*dx+(point[1]-a[1])*dy)/length,0,1):0;
+    const gap=Math.hypot(point[0]-a[0]-dx*t,point[1]-a[1]-dy*t);
+    if(gap<distance){distance=gap;best=grid;}
+  }
+  return best;
+}
+function drawModelGrids() {
+  const [bottom,top]=modelGridHeight();
+  for(const grid of grids()){
+    if(grid.hidden)continue;
+    const world=gridWorldEndpoints(grid),low=modelGridScreenLine(grid,bottom);
+    if(!world||!low)continue;
+    const selected=grid.id===selectedGridId,hovered=grid.id===hoverGridId;
+    const high=world.map(([x,y])=>stagePoint([x,y,top]));
+    if(selected&&high.every(point=>point.slice(0,2).every(Number.isFinite))){
+      ctx.beginPath();ctx.moveTo(low[0][0],low[0][1]);ctx.lineTo(low[1][0],low[1][1]);
+      ctx.lineTo(high[1][0],high[1][1]);ctx.lineTo(high[0][0],high[0][1]);ctx.closePath();
+      ctx.fillStyle='#299ce83b';ctx.fill();ctx.strokeStyle='#1685d0';ctx.lineWidth=1.3;ctx.stroke();
+    }
+    ctx.save();ctx.setLineDash([6,4]);ctx.strokeStyle=selected||hovered?'#1596ef':'#4c8db7';
+    ctx.lineWidth=selected||hovered?2:1.25;ctx.beginPath();
+    ctx.moveTo(low[0][0],low[0][1]);ctx.lineTo(low[1][0],low[1][1]);ctx.stroke();ctx.restore();
+    const [x,y]=low[0];ctx.beginPath();ctx.arc(x,y,selected||hovered?10:8,0,Math.PI*2);
+    ctx.fillStyle=selected?'#d7efff':'#f7fbfd';ctx.fill();ctx.strokeStyle='#2879ac';ctx.stroke();
+    ctx.fillStyle='#215b81';ctx.font='bold 10px Segoe UI, sans-serif';ctx.textAlign='center';
+    ctx.fillText(grid.name,x,y+3.3);
+  }
+}
 function saveSheetLayout(layout) {
   if (!state.doc || state.busy) return Promise.resolve(false);
   return edit(state.doc.sheet,{...state.doc.sheet,layout},'sheet');
@@ -5377,6 +5574,7 @@ function layoutViewAt(point) {
 }
 function selectLayoutItem(kind,id) {
   layoutSelected={kind,id};
+  selectedGridId=kind==='grid'?id:null;
   const panel=$('#layout-selection');
   panel.hidden=false;
   const view=kind==='view'?sheetLayout().views.find(item=>item.id===id):null;
@@ -5385,9 +5583,11 @@ function selectLayoutItem(kind,id) {
   $('#layout-view-title-row').hidden=!view;
   $('#layout-text-row').hidden=!item;
   $('#layout-grid-name-row').hidden=!grid;
+  $('#layout-grid-visibility').hidden=!grid;
   if(view) $('#layout-view-title').value=view.title;
   if(item) $('#layout-text-value').value=item.text;
   if(grid) $('#layout-grid-name').value=grid.name;
+  if(grid) $('#layout-grid-visibility').textContent=grid.hidden?'Tampilkan grid':'Sembunyikan grid';
   drawSheet();
 }
 function setLayoutTool(tool) {
@@ -5493,10 +5693,12 @@ function drawSheet() {
         viewText(center[0],dy-1.5,lengthLabel(max[0]-min[0]),{'text-anchor':'middle','font-size':2.9});
       }
     }
-    for(const grid of (layout.gridLines||[]).filter(item=>item.viewId===id)) {
-      const [ax,ay]=grid.a,[bx,by]=grid.b;
+    for(const grid of (layout.gridLines||[])) {
+      const segment=gridSegment(grid,view);
+      if(!segment)continue;
+      const [ax,ay]=segment[0],[bx,by]=segment[1];
       const head=[x+ax,y+ay],tail=[x+bx,y+by];
-      const mark=svg('g',{'data-grid-id':grid.id,class:layoutSelected?.kind==='grid'&&layoutSelected.id===grid.id?'layout-selected':''});
+      const mark=svg('g',{'data-grid-id':grid.id,class:'layout-grid'+(selectedGridId===grid.id?' layout-selected':'')});
       mark.append(svg('line',{x1:head[0],y1:head[1],x2:tail[0],y2:tail[1],stroke:'#437a9e','stroke-width':.34,'stroke-dasharray':'3 1.4'}));
       mark.append(svg('line',{x1:head[0],y1:head[1],x2:tail[0],y2:tail[1],stroke:'transparent','stroke-width':5}));
       mark.append(svg('circle',{cx:head[0],cy:head[1],r:3.1,fill:'#fff',stroke:'#366b91','stroke-width':.45}));
@@ -5514,9 +5716,11 @@ function drawSheet() {
       const gridA=dimension.gridA&&(layout.gridLines||[]).find(item=>item.id===dimension.gridA);
       const gridB=dimension.gridB&&(layout.gridLines||[]).find(item=>item.id===dimension.gridB);
       if(gridA&&gridB) {
-        const dx=gridA.b[0]-gridA.a[0],dy=gridA.b[1]-gridA.a[1],len=Math.hypot(dx,dy)||1;
-        const normal=[-dy/len,dx/len],distance=(gridB.a[0]-gridA.a[0])*normal[0]+(gridB.a[1]-gridA.a[1])*normal[1];
-        aLocal=[gridA.a[0]-dx/len*7,gridA.a[1]-dy/len*7];
+        const segmentA=gridSegment({...gridA,hidden:false},view),segmentB=gridSegment({...gridB,hidden:false},view);
+        if(!segmentA||!segmentB)continue;
+        const dx=segmentA[1][0]-segmentA[0][0],dy=segmentA[1][1]-segmentA[0][1],len=Math.hypot(dx,dy)||1;
+        const normal=[-dy/len,dx/len],distance=(segmentB[0][0]-segmentA[0][0])*normal[0]+(segmentB[0][1]-segmentA[0][1])*normal[1];
+        aLocal=[segmentA[0][0]-dx/len*7,segmentA[0][1]-dy/len*7];
         bLocal=[aLocal[0]+normal[0]*distance,aLocal[1]+normal[1]*distance];
       }
       const [ax,ay]=aLocal,[bx,by]=bLocal;
@@ -5610,6 +5814,11 @@ $('#sheet').addEventListener('pointermove',event=>{
     return;
   }
   if (layoutDrag) {
+    if(layoutDrag.kind==='grid'){
+      layoutDrag.dx=point[0]-layoutDrag.start[0];
+      layoutDrag.dy=point[1]-layoutDrag.start[1];
+      drawSheet();return;
+    }
     const source=layoutDrag.kind==='view'?sheetLayout().views.find(item=>item.id===layoutDrag.id)
       :sheetLayout().texts.find(item=>item.id===layoutDrag.id);
     if (!source) return;
@@ -5676,11 +5885,10 @@ $('#sheet').addEventListener('pointerdown',event=>{
     }
     const start=layoutGridPending;
     if(Math.hypot(local[0]-start.a[0],local[1]-start.a[1])<2)return;
-    const layout=sheetLayout(),number=(layout.gridLines||[]).filter(item=>item.viewId===view.id).length;
-    const suggested=String.fromCharCode(65+number%26)+(number>=26?Math.floor(number/26)+1:'');
-    const name=prompt('Nama grid pada bubble:',suggested)?.trim();
-    if(!name)return;
-    const line={id:identity(),viewId:view.id,a:start.a,b:local,name:name.slice(0,12)};
+    const layout=sheetLayout(),name=nextGridName();
+    const world=gridWorldFromLocal(view,start.a,local);
+    if(!world){showStatus('Grid tidak dapat dibuat pada view ini.');return;}
+    const line={id:identity(),viewId:view.id,a:start.a,b:local,name,worldA:world[0],worldB:world[1],hidden:false};
     layoutGridPending=null;layoutGridHover=null;
     saveSheetLayout({...layout,gridLines:[...(layout.gridLines||[]),line]}).then(saved=>{
       if(saved)selectLayoutItem('grid',line.id);
@@ -5691,7 +5899,7 @@ $('#sheet').addEventListener('pointerdown',event=>{
   if(layoutTool==='dimension') {
     if (!view || view.mode==='iso') {showStatus('Dimensi tersedia pada denah dan tampak ortografis.');return;}
     const gridId=event.target.closest('[data-grid-id]')?.getAttribute('data-grid-id');
-    const layout=sheetLayout(),grid=(layout.gridLines||[]).find(item=>item.id===gridId&&item.viewId===view.id);
+    const layout=sheetLayout(),grid=(layout.gridLines||[]).find(item=>item.id===gridId&&gridSegment(item,view));
     if(!grid) {showStatus('Klik batang grid pertama, lalu batang grid sebelahnya.');return;}
     if(!layoutDimensionStart || layoutDimensionStart.viewId!==view.id) {
       layoutDimensionStart={viewId:view.id,gridId:grid.id};
@@ -5699,10 +5907,13 @@ $('#sheet').addEventListener('pointerdown',event=>{
     } else {
       const first=(layout.gridLines||[]).find(item=>item.id===layoutDimensionStart.gridId);
       if(!first || first.id===grid.id)return;
-      const ad=[first.b[0]-first.a[0],first.b[1]-first.a[1]],bd=[grid.b[0]-grid.a[0],grid.b[1]-grid.a[1]];
+      const firstSegment=gridSegment(first,view),secondSegment=gridSegment(grid,view);
+      if(!firstSegment||!secondSegment)return;
+      const ad=[firstSegment[1][0]-firstSegment[0][0],firstSegment[1][1]-firstSegment[0][1]],
+        bd=[secondSegment[1][0]-secondSegment[0][0],secondSegment[1][1]-secondSegment[0][1]];
       const parallel=Math.abs((ad[0]*bd[0]+ad[1]*bd[1])/(Math.hypot(...ad)*Math.hypot(...bd)));
       if(parallel<.98){showStatus('Dimensi antar-grid memerlukan dua garis sejajar.');return;}
-      const dimension={id:identity(),viewId:view.id,a:first.a,b:grid.a,gridA:first.id,gridB:grid.id};
+      const dimension={id:identity(),viewId:view.id,a:firstSegment[0],b:secondSegment[0],gridA:first.id,gridB:grid.id};
       saveSheetLayout({...layout,dimensions:[...layout.dimensions,dimension]});
       layoutDimensionStart=null;
       showStatus('Dimensi antar-grid dibuat. Pilih pasangan berikutnya.');
@@ -5718,8 +5929,13 @@ $('#sheet').addEventListener('pointerdown',event=>{
     if(layoutActiveViewId && kind==='view' && id!==layoutActiveViewId) {
       showStatus('Double click view lain untuk beralih.');return;
     }
-    if(layoutActiveViewId && kind==='grid' && !(sheetLayout().gridLines||[]).some(item=>item.id===id&&item.viewId===layoutActiveViewId))return;
+    if(layoutActiveViewId && kind==='grid' && (!view || view.id!==layoutActiveViewId ||
+      !grids().some(item=>item.id===id&&gridSegment(item,view))))return;
     selectLayoutItem(kind,id);
+    if(layoutActiveViewId && kind==='grid'){
+      layoutDrag={kind:'grid',id,viewId:view.id,start:point,dx:0,dy:0};
+      event.currentTarget.setPointerCapture(event.pointerId);return;
+    }
     if(layoutActiveViewId && kind!=='text')return;
     const source=kind==='view'?sheetLayout().views.find(item=>item.id===id)
       :sheetLayout().texts.find(item=>item.id===id);
@@ -5734,6 +5950,20 @@ $('#sheet').addEventListener('pointerdown',event=>{
 $('#sheet').addEventListener('pointerup',event=>{
   if (!layoutDrag) return;
   const drag=layoutDrag;layoutDrag=null;
+  if(drag.kind==='grid'){
+    const grid=grids().find(item=>item.id===drag.id);
+    const view=sheetLayout().views.find(item=>item.id===drag.viewId);
+    if(!grid||!view)return;
+    if(Math.hypot(drag.dx,drag.dy)<.5){drawSheet();return;}
+    const world=gridWorldEndpoints(grid),factor=layoutProjection(view).factor;
+    if(!world||!factor)return;
+    const delta=view.mode==='plan'?[drag.dx/factor,-drag.dy/factor]:
+      view.mode==='front'?[drag.dx/factor,0]:[0,drag.dx/factor];
+    if(Math.hypot(...delta)<1e-5){drawSheet();return;}
+    updateGrid(grid.id,{worldA:[world[0][0]+delta[0],world[0][1]+delta[1]],
+      worldB:[world[1][0]+delta[0],world[1][1]+delta[1]]});
+    return;
+  }
   const source=drag.kind==='view'?sheetLayout().views.find(item=>item.id===drag.id)
     :sheetLayout().texts.find(item=>item.id===drag.id);
   if (!source) return;
@@ -5796,22 +6026,25 @@ $('#layout-text-value').onchange=event=>{
 };
 $('#layout-grid-name').onchange=event=>{
   if(layoutSelected?.kind!=='grid')return;
-  const name=event.target.value.trim();if(!name)return;
-  const layout=sheetLayout();
-  saveSheetLayout({...layout,gridLines:(layout.gridLines||[]).map(item=>item.id===layoutSelected.id?{...item,name}:item)});
+  renameGrid(layoutSelected.id,event.target.value);
+};
+$('#layout-grid-visibility').onclick=()=>{
+  if(layoutSelected?.kind!=='grid')return;
+  const grid=grids().find(item=>item.id===layoutSelected.id);
+  if(!grid)return;
+  updateGrid(grid.id,{hidden:!grid.hidden});
+  $('#layout-grid-visibility').textContent=grid.hidden?'Sembunyikan grid':'Tampilkan grid';
 };
 $('#layout-delete').onclick=()=>{
   if(!layoutSelected)return;
+  if(layoutSelected.kind==='grid'){removeGrid(layoutSelected.id);return;}
   const layout=sheetLayout();
   const deletingActiveView=layoutSelected.kind==='view'&&layoutSelected.id===layoutActiveViewId;
   const next=layoutSelected.kind==='view'
     ?{...layout,views:layout.views.filter(item=>item.id!==layoutSelected.id),
-      gridLines:(layout.gridLines||[]).filter(item=>item.viewId!==layoutSelected.id),
+      gridLines:(layout.gridLines||[]).filter(item=>item.viewId!==layoutSelected.id||item.worldA),
       texts:layout.texts.filter(item=>item.viewId!==layoutSelected.id),
       dimensions:layout.dimensions.filter(item=>item.viewId!==layoutSelected.id)}
-    :layoutSelected.kind==='grid'
-    ?{...layout,gridLines:(layout.gridLines||[]).filter(item=>item.id!==layoutSelected.id),
-      dimensions:layout.dimensions.filter(item=>item.gridA!==layoutSelected.id&&item.gridB!==layoutSelected.id)}
     :layoutSelected.kind==='dimension'
     ?{...layout,dimensions:layout.dimensions.filter(item=>item.id!==layoutSelected.id)}
     :{...layout,texts:layout.texts.filter(item=>item.id!==layoutSelected.id)};
