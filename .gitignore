@@ -9,3 +9,4 @@
 /.vercel/
 /.env.local
 /qreasee-studio.exe
+/supabase/.temp/

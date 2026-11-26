@@ -54,10 +54,20 @@ interface QreaseeSheet {
   cut_height: number;
 }
 
+interface QreaseeComment {
+  id: string;
+  target: string;
+  author: string;
+  text: string;
+  created_at: number;
+  mentions?: string[];
+}
+
 interface QreaseeDocument {
   revision: number;
   objects: QreaseeObject[];
   sheet: QreaseeSheet;
+  comments?: QreaseeComment[];
   faces_initialized?: boolean;
 }
 
@@ -87,7 +97,13 @@ interface QreaseeSheetEdit {
   after: QreaseeSheet;
 }
 
-type QreaseeEdit = QreaseeObjectEdit | QreaseeBatchEdit | QreaseeSheetEdit;
+interface QreaseeCommentEdit {
+  type: 'comment';
+  before?: QreaseeComment | null;
+  after?: QreaseeComment | null;
+}
+
+type QreaseeEdit = QreaseeObjectEdit | QreaseeBatchEdit | QreaseeSheetEdit | QreaseeCommentEdit;
 
 interface QreaseeChangeSet {
   document: QreaseeDocument;

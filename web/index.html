@@ -65,6 +65,7 @@
           <button id="sign-out" hidden>Keluar</button>
         </div>
       </div>
+      <button class="header-tool" id="comments-toggle" title="Komentar" aria-label="Tampilkan komentar" aria-expanded="false" aria-controls="comments-panel" data-icon="comment" data-count=""></button>
       <button class="header-tool" id="inspector-toggle" title="Tampilkan properti" aria-label="Tampilkan properti" aria-expanded="false" aria-controls="inspector" data-icon="sliders"></button>
       <button class="share" id="share"><span data-icon="users"></span> Bagikan</button>
     </div>
@@ -91,6 +92,18 @@
     </aside>
     <section class="stage" id="model-stage" aria-label="Kanvas model">
       <canvas id="viewport" tabindex="0" aria-label="Kanvas model 3D"></canvas>
+      <div id="comment-composer" class="comment-composer" role="dialog" aria-label="Tulis komentar" hidden>
+        <div class="comment-composer-head">
+          <span data-icon="comment" aria-hidden="true"></span>
+          <div><strong>Tambah komentar</strong><small id="comment-target-name"></small></div>
+          <button id="comment-cancel" type="button" aria-label="Tutup komentar" data-icon="close"></button>
+        </div>
+        <div class="comment-composer-body">
+          <textarea id="comment-text" rows="3" maxlength="1000" placeholder="Tulis komentar… gunakan @ untuk menyebut orang" aria-label="Isi komentar"></textarea>
+          <div id="comment-mentions" class="comment-mentions" hidden></div>
+          <div class="comment-composer-foot"><span id="comment-compose-status" role="status"></span><button id="comment-send" class="share" type="button">Kirim</button></div>
+        </div>
+      </div>
       <div class="stage-top">
         <div class="view-control">
           <span data-icon="cube"></span>
@@ -166,8 +179,17 @@
         </form>
       </div>
     </aside>
+    <aside class="sidebar comments-panel" id="comments-panel" aria-label="Komentar" hidden>
+      <div class="pane-heading"><h2>Komentar</h2><button id="comments-close" aria-label="Tutup komentar" data-icon="close"></button></div>
+      <p class="comments-hint">Komentar terikat pada objek. Menghapus objek juga menghapus komentarnya.</p>
+      <div id="comment-list" class="comment-list"></div>
+    </aside>
   </main>
   <span id="revision" hidden></span>
+  <div id="object-menu" class="object-menu" role="menu" hidden>
+    <div class="object-menu-title" id="object-menu-title"></div>
+    <button id="object-menu-comment" role="menuitem"><span data-icon="comment"></span> Komentar</button>
+  </div>
   <dialog id="share-dialog">
     <form method="dialog" class="dialog-head"><h2>Bagikan proyek</h2><button aria-label="Tutup" data-icon="close"></button></form>
     <p>Siapa pun dengan tautan ini dapat mengedit proyek di server yang sama.</p>

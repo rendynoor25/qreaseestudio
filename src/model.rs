@@ -426,11 +426,41 @@ impl Sheet {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Comment {
+    pub id: String,
+    pub target: String,
+    pub author: String,
+    pub text: String,
+    pub created_at: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mentions: Vec<String>,
+}
+
+impl Comment {
+    fn valid(&self) -> bool {
+        uuid::Uuid::parse_str(&self.id).is_ok()
+            && uuid::Uuid::parse_str(&self.target).is_ok()
+            && !self.author.trim().is_empty()
+            && self.author.chars().count() <= 32
+            && !self.text.trim().is_empty()
+            && self.text.chars().count() <= 1000
+            && self.created_at > 0
+            && self.mentions.len() <= 16
+            && self
+                .mentions
+                .iter()
+                .all(|name| !name.trim().is_empty() && name.chars().count() <= 32)
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Document {
     pub revision: u64,
     pub objects: Vec<Object>,
     pub sheet: Sheet,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub comments: Vec<Comment>,
     #[serde(default)]
     pub faces_initialized: bool,
 }
@@ -451,6 +481,10 @@ pub enum Edit {
     Sheet {
         before: Sheet,
         after: Sheet,
+    },
+    Comment {
+        before: Option<Comment>,
+        after: Option<Comment>,
     },
 }
 
@@ -483,9 +517,69 @@ pub fn apply(document: &mut Document, edit: Edit) -> Result<FaceChanges, &'stati
             document.sheet = after;
             FaceChanges::default()
         }
+        Edit::Comment { before, after } => {
+            apply_comment(document, before, after)?;
+            FaceChanges::default()
+        }
     };
     document.revision += 1;
     Ok(changes)
+}
+
+fn comment_target_exists(objects: &[Object], target: &str) -> bool {
+    objects.iter().any(|object| {
+        object.id == target
+            || object
+                .container
+                .as_ref()
+                .is_some_and(|container| container.id == target)
+    })
+}
+
+fn apply_comment(
+    document: &mut Document,
+    before: Option<Comment>,
+    after: Option<Comment>,
+) -> Result<(), &'static str> {
+    match (before, after) {
+        (None, Some(comment)) => {
+            if !comment.valid() || !comment_target_exists(&document.objects, &comment.target) {
+                return Err("Komentar atau objek target tidak valid.");
+            }
+            if document.comments.iter().any(|item| item.id == comment.id) {
+                return Err("conflict");
+            }
+            if document.comments.len() >= 200 {
+                return Err("Batas 200 komentar per proyek tercapai.");
+            }
+            document.comments.push(comment);
+            Ok(())
+        }
+        (Some(before), None) => {
+            let Some(index) = document.comments.iter().position(|item| item.id == before.id) else {
+                return Err("conflict");
+            };
+            if document.comments[index] != before {
+                return Err("conflict");
+            }
+            document.comments.remove(index);
+            Ok(())
+        }
+        (Some(before), Some(after)) => {
+            if !after.valid() || !comment_target_exists(&document.objects, &after.target) {
+                return Err("Komentar atau objek target tidak valid.");
+            }
+            let Some(index) = document.comments.iter().position(|item| item.id == before.id) else {
+                return Err("conflict");
+            };
+            if document.comments[index] != before || after.id != before.id {
+                return Err("conflict");
+            }
+            document.comments[index] = after;
+            Ok(())
+        }
+        (None, None) => Err("Perintah komentar tidak valid."),
+    }
 }
 
 fn apply_objects(
@@ -560,6 +654,15 @@ fn apply_objects(
         return Err("Batas ruang model adalah 250 objek.");
     }
     validate_containers(&next)?;
+    document.comments.retain(|comment| {
+        next.iter().any(|object| {
+            object.id == comment.target
+                || object
+                    .container
+                    .as_ref()
+                    .is_some_and(|container| container.id == comment.target)
+        })
+    });
     document.objects = next;
     Ok(changes)
 }
@@ -739,6 +842,7 @@ pub fn demo() -> Document {
             notes: "Dimensi model dalam meter.".into(),
             cut_height: default_cut_height(),
         },
+        comments: Vec::new(),
         faces_initialized: true,
     }
 }
@@ -886,5 +990,118 @@ mod tests {
             Err("conflict")
         );
         assert_eq!(doc.revision, 2);
+    }
+
+    #[test]
+    fn comments_are_attached_to_targets_and_deleted_with_them() {
+        let mut doc = demo();
+        let first = doc.objects[0].clone();
+        let comment = Comment {
+            id: uuid::Uuid::new_v4().to_string(),
+            target: first.id.clone(),
+            author: "Rina".into(),
+            text: "Periksa ketebalan @Budi".into(),
+            created_at: 1_700_000_000_000,
+            mentions: vec!["Budi".into()],
+        };
+        apply(
+            &mut doc,
+            Edit::Comment {
+                before: None,
+                after: Some(comment.clone()),
+            },
+        )
+        .unwrap();
+        assert_eq!(doc.comments, vec![comment]);
+        apply(
+            &mut doc,
+            Edit::Object {
+                before: Some(first),
+                after: None,
+            },
+        )
+        .unwrap();
+        assert!(doc.comments.is_empty());
+    }
+
+    #[test]
+    fn container_comments_remain_until_the_group_disappears() {
+        let mut doc = demo();
+        let mut first = doc.objects[0].clone();
+        let mut second = doc.objects[1].clone();
+        let container = Membership {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Atap Grup".into(),
+            definition: None,
+            slot: None,
+        };
+        first.container = Some(Box::new(container.clone()));
+        second.container = Some(Box::new(container.clone()));
+        let previous = doc.objects[..2].to_vec();
+        apply(
+            &mut doc,
+            Edit::Batch {
+                before: previous,
+                after: vec![first.clone(), second.clone()],
+                replay: false,
+            },
+        )
+        .unwrap();
+        apply(
+            &mut doc,
+            Edit::Comment {
+                before: None,
+                after: Some(Comment {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    target: container.id,
+                    author: "Rina".into(),
+                    text: "Grup ini perlu ditinjau.".into(),
+                    created_at: 1_700_000_000_000,
+                    mentions: Vec::new(),
+                }),
+            },
+        )
+        .unwrap();
+        apply(
+            &mut doc,
+            Edit::Object {
+                before: Some(first),
+                after: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(doc.comments.len(), 1, "comment follows the remaining group");
+        apply(
+            &mut doc,
+            Edit::Object {
+                before: Some(second),
+                after: None,
+            },
+        )
+        .unwrap();
+        assert!(doc.comments.is_empty());
+    }
+
+    #[test]
+    fn comment_target_must_exist() {
+        let mut doc = demo();
+        let comment = Comment {
+            id: uuid::Uuid::new_v4().to_string(),
+            target: uuid::Uuid::new_v4().to_string(),
+            author: "Rina".into(),
+            text: "Tidak ada target.".into(),
+            created_at: 1_700_000_000_000,
+            mentions: Vec::new(),
+        };
+        assert_eq!(
+            apply(
+                &mut doc,
+                Edit::Comment {
+                    before: None,
+                    after: Some(comment),
+                }
+            ),
+            Err("Komentar atau objek target tidak valid.")
+        );
     }
 }
