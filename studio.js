@@ -24,7 +24,7 @@ const icons = {
   trash:'<path d="M3 6h18M9 6V3h6v3m3 0-1 15H7L6 6m4 4v7m4-7v7"/>',
   minus:'<path d="M5 12h14"/>', plus:'<path d="M5 12h14M12 5v14"/>',
   close:'<path d="m6 6 12 12M18 6 6 18"/>',
-  moon:'<path d="M20 15.5A8 8 0 0 1 8.5 4 8 8 0 1 0 20 15.5z"/>',
+  moon:'<path fill="currentColor" stroke="none" d="M12 3a6.4 6.4 0 0 0 9 9 9 9 0 1 1-9-9z"/>',
   sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/>',
   select:'<path d="m5 3 14 10-7 1-3 6z"/>',
   line:'<path d="m5 19 14-14"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/>',
@@ -275,6 +275,7 @@ function theme(value) {
   icon($('#theme-toggle'),value==='light'?'moon':'sun');
   $('#theme-toggle').title=value==='light'?'Gunakan tema gelap':'Gunakan tema terang';
   localStorage.setItem('qreasee-theme',value);
+  redraw();
 }
 theme(localStorage.getItem('qreasee-theme')==='light'?'light':'dark');
 $('#theme-toggle').onclick=()=>theme(document.body.dataset.theme==='light'?'dark':'light');
@@ -1549,6 +1550,11 @@ function smoothTone(face) {
 }
 
 function drawGrid(width,height) {
+  const dark=document.body.dataset.theme!=='light';
+  const minor=dark?'#3f4447':'#c4cfd1';
+  const major=dark?'#51575b':'#acb9bd';
+  const xAxis=dark?'#5b8a76':'#619a83';
+  const yAxis=dark?'#9c6661':'#bd7f78';
   const samples=[];
   for(let i=0;i<=4;i++) for(let j=0;j<=4;j++) {
     const point=ground([width*i/4,height*j/4]);
@@ -1564,11 +1570,11 @@ function drawGrid(width,height) {
   const step = Math.max(1, 10**Math.ceil(Math.log10(Math.max(max[0]-min[0],max[1]-min[1])/150)));
   for (let x=Math.floor(min[0]/step)*step; x<=max[0]; x+=step) {
     gridLine([x,min[1],0],[x,max[1],0],
-      x === 0 ? '#619a83' : x%(5*step)===0 ? '#acb9bd' : '#c4cfd1', x === 0 ? 1.1 : .75);
+      x === 0 ? xAxis : x%(5*step)===0 ? major : minor, x === 0 ? 1.1 : .75);
   }
   for (let y=Math.floor(min[1]/step)*step; y<=max[1]; y+=step) {
     gridLine([min[0],y,0],[max[0],y,0],
-      y === 0 ? '#bd7f78' : y%(5*step)===0 ? '#acb9bd' : '#c4cfd1', y === 0 ? 1.1 : .75);
+      y === 0 ? yAxis : y%(5*step)===0 ? major : minor, y === 0 ? 1.1 : .75);
   }
 }
 
@@ -1605,9 +1611,10 @@ function draw() {
   canvas.width = Math.max(1, Math.round(width*pixel));
   canvas.height = Math.max(1, Math.round(height*pixel));
   ctx.setTransform(pixel,0,0,pixel,0,0);
+  const dark=document.body.dataset.theme!=='light';
   const backdrop = ctx.createLinearGradient(0,0,0,height);
-  backdrop.addColorStop(0,'#f2f4f4');
-  backdrop.addColorStop(1,'#d4dcdd');
+  backdrop.addColorStop(0,dark?'#353a3d':'#f2f4f4');
+  backdrop.addColorStop(1,dark?'#23272a':'#d4dcdd');
   ctx.fillStyle = backdrop;
   ctx.fillRect(0,0,width,height);
   drawGrid(width,height);
@@ -1637,7 +1644,7 @@ function draw() {
           ctx.restore();
         }
       }
-      ctx.strokeStyle = selected ? '#c87936' : '#4f5150';
+      ctx.strokeStyle = selected ? '#c87936' : dark ? '#aeb3b7' : '#4f5150';
       ctx.lineWidth = selected ? 1.65 : .8;
       if (face.edges) {
         ctx.beginPath();
