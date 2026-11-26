@@ -876,6 +876,11 @@ function selectConnected(object,additive=false) {
   const ids=object.shape==='line'
     ? QreaseeLine.connectedLines(object.id,eligible.map(entry=>entry.object))
     : QreaseeLine.connectedFaces(object.id,eligible);
+  if (object.shape!=='line') {
+    for (const id of QreaseeLine.boundaryLineIds(ids,eligible)) {
+      if (!ids.includes(id)) ids.push(id);
+    }
+  }
   state.selected=additive?new Set([...state.selected,...ids]):new Set(ids);
   refresh();
   showStatus(ids.length+' objek terhubung dipilih.');

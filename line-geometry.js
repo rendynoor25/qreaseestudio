@@ -21,6 +21,7 @@ var QreaseeLine = (() => {
   var line_geometry_exports = {};
   __export(line_geometry_exports, {
     axisSnap: () => axisSnap,
+    boundaryLineIds: () => boundaryLineIds,
     boxHitsGeometry: () => boxHitsGeometry,
     closedLoop: () => closedLoop,
     connectedFaces: () => connectedFaces,
@@ -488,6 +489,27 @@ var QreaseeLine = (() => {
       }
     }
     return queue;
+  }
+  function boundaryLineIds(faceIds, entries) {
+    const selected = new Set(faceIds);
+    const vertexKey = (point) => point.map((value) => Math.round(value * precision)).join(":");
+    const edgeKey = (a, b) => [vertexKey(a), vertexKey(b)].sort().join("|");
+    const edges = /* @__PURE__ */ new Set();
+    for (const { object, mesh } of entries) {
+      if (!selected.has(object.id) || object.shape === "line") continue;
+      for (const face of mesh.faces) {
+        for (let i = 0; i < face.length; i++) {
+          const a = mesh.vertices[face[i]], b = mesh.vertices[face[(i + 1) % face.length]];
+          if (a && b) edges.add(edgeKey(a, b));
+        }
+      }
+    }
+    const result = [];
+    for (const { object, mesh } of entries) {
+      if (object.shape !== "line" || mesh.vertices.length < 2) continue;
+      if (edges.has(edgeKey(mesh.vertices[0], mesh.vertices[1]))) result.push(object.id);
+    }
+    return result;
   }
   function connectedFaces(seedId, entries) {
     const byEdge = /* @__PURE__ */ new Map();
