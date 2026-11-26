@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' https://*.supabase.co; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Qreasee Admin</title>
+  <link rel="stylesheet" href="./admin.css">
+</head>
+<body>
+  <div id="gate" class="gate" hidden>
+    <div class="gate-card">
+      <div class="gate-brand"><span class="brand-mark" aria-hidden="true"></span><span>Qreasee</span><em>Admin</em></div>
+      <h1 id="gate-title">Memeriksa sesi</h1>
+      <p id="gate-message" class="gate-message">Menghubungkan ke Supabase.</p>
+      <div id="gate-extra"></div>
+      <div id="gate-actions" class="gate-actions"></div>
+      <p class="gate-foot">Halaman ini hanya untuk administrator Qreasee. Data pengguna bersifat pribadi.</p>
+    </div>
+  </div>
+
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <div class="topbar-brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div><strong>Qreasee</strong><span class="brand-tag">Admin</span></div>
+      </div>
+      <div class="topbar-actions">
+        <span id="latency" class="latency" title="Waktu RPC terakhir"></span>
+        <span id="updated" class="updated"></span>
+        <button id="refresh" type="button" class="button ghost" title="Muat ulang data">Muat ulang</button>
+        <a class="button ghost" href="./">Buka Studio</a>
+        <div class="account">
+          <span id="account-chip" class="account-chip"></span>
+          <button id="sign-out" type="button" class="button ghost">Keluar</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="shell">
+      <nav class="sidebar" aria-label="Bagian admin">
+        <button type="button" class="nav-item active" data-section="overview">
+          <span class="nav-icon" aria-hidden="true">◧</span><span>Ringkasan</span>
+        </button>
+        <button type="button" class="nav-item" data-section="users">
+          <span class="nav-icon" aria-hidden="true">◉</span><span>Pengguna</span>
+        </button>
+        <button type="button" class="nav-item" data-section="projects">
+          <span class="nav-icon" aria-hidden="true">▤</span><span>Proyek</span>
+        </button>
+        <button type="button" class="nav-item" data-section="comments">
+          <span class="nav-icon" aria-hidden="true">✎</span><span>Komentar</span>
+        </button>
+        <button type="button" class="nav-item" data-section="system">
+          <span class="nav-icon" aria-hidden="true">⚙</span><span>Sistem</span>
+        </button>
+        <button type="button" class="nav-item" data-section="admins">
+          <span class="nav-icon" aria-hidden="true">★</span><span>Admin</span>
+        </button>
+        <div class="sidebar-note">Metrik dihitung langsung dari Supabase. Waktu dalam UTC.</div>
+      </nav>
+
+      <main id="content" class="content">
+        <section class="panel" data-panel="overview">
+          <div class="panel-head">
+            <div><p class="eyebrow">Ringkasan</p><h2>Kondisi Qreasee saat ini</h2></div>
+            <p class="panel-note" id="overview-range"></p>
+          </div>
+          <div id="kpi-grid" class="kpi-grid"></div>
+          <div class="card chart-card">
+            <div class="card-head">
+              <h3>Aktivitas 30 hari</h3>
+              <div class="legend">
+                <span><i class="dot signup"></i>Pengguna baru</span>
+                <span><i class="dot project"></i>Proyek baru</span>
+                <span><i class="dot active"></i>Proyek aktif</span>
+              </div>
+            </div>
+            <div id="chart" class="chart"></div>
+          </div>
+          <div class="split">
+            <div class="card">
+              <div class="card-head"><h3>Proyek terbesar</h3><span class="card-hint">10 teratas berdasarkan objek</span></div>
+              <div id="overview-projects" class="table-wrap"></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>Online sekarang</h3><span class="card-hint">2 menit terakhir</span></div>
+              <div id="overview-online" class="list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="users" hidden>
+          <div class="panel-head">
+            <div><p class="eyebrow">Pengguna</p><h2>Akun Google yang pernah masuk</h2></div>
+            <p class="panel-note">Email hanya terlihat oleh admin.</p>
+          </div>
+          <div class="toolbar">
+            <label class="search"><span>Cari</span><input id="user-search" type="search" placeholder="Nama atau email" autocomplete="off"></label>
+            <span id="user-count" class="count"></span>
+          </div>
+          <div class="card"><div id="users-table" class="table-wrap"></div></div>
+        </section>
+
+        <section class="panel" data-panel="projects" hidden>
+          <div class="panel-head">
+            <div><p class="eyebrow">Proyek</p><h2>Ruang kerja yang tersimpan</h2></div>
+            <p class="panel-note">Termasuk proyek tanpa aktivitas terbaru.</p>
+          </div>
+          <div class="toolbar">
+            <label class="search"><span>Cari</span><input id="project-search" type="search" placeholder="Judul, pemilik, atau ID" autocomplete="off"></label>
+            <span id="project-count" class="count"></span>
+          </div>
+          <div class="card"><div id="projects-table" class="table-wrap"></div></div>
+        </section>
+
+        <section class="panel" data-panel="comments" hidden>
+          <div class="panel-head">
+            <div><p class="eyebrow">Komentar</p><h2>Diskusi terbaru di proyek</h2></div>
+            <p class="panel-note">200 komentar terakhir.</p>
+          </div>
+          <div id="comments-list" class="comment-list"></div>
+        </section>
+
+        <section class="panel" data-panel="system" hidden>
+          <div class="panel-head">
+            <div><p class="eyebrow">Sistem</p><h2>Kapasitas dan distribusi</h2></div>
+            <p class="panel-note">Tanpa data rahasia; hanya agregat.</p>
+          </div>
+          <div id="system-grid" class="kpi-grid"></div>
+          <div class="split">
+            <div class="card">
+              <div class="card-head"><h3>Akses tautan</h3><span class="card-hint">Jumlah proyek</span></div>
+              <div id="share-bars" class="bars"></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>Kesehatan RPC</h3></div>
+              <div id="system-health" class="list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="admins" hidden>
+          <div class="panel-head">
+            <div><p class="eyebrow">Admin</p><h2>Daftar administrator</h2></div>
+            <p class="panel-note">Hanya super admin dapat menambah atau menghapus admin.</p>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Administrator</h3><span id="admin-count" class="card-hint"></span></div>
+            <div id="admins-table" class="table-wrap"></div>
+          </div>
+          <form id="admin-form" class="card admin-form" hidden>
+            <div class="card-head"><h3>Tambah admin</h3><span class="card-hint">Email harus sama dengan akun Google</span></div>
+            <div class="form-row">
+              <label>Email<input id="admin-email" type="email" required maxlength="254" placeholder="nama@contoh.com" autocomplete="off"></label>
+              <label>Peran<select id="admin-role"><option value="admin">Admin</option><option value="super">Super admin</option></select></label>
+              <button type="submit" class="button primary">Tambahkan</button>
+            </div>
+            <p id="admin-form-note" class="form-note"></p>
+          </form>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script src="./cloud-config.js" defer></script>
+  <script src="./admin.js" defer></script>
+</body>
+</html>
