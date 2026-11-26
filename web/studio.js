@@ -82,10 +82,32 @@ const state = {
   doc: null, meshes: [], plans: [], selected: new Set(), inside: null, tool: 'select', layout: false, busy: false,
   snapping: true, inference: null,
   undo: [], redo: [], drag: null, arcPending:null, linePending:null, linePress:null, drawPending:null,
-  hits: [], epoch: 0, polling: false, peers:[], cursor:null
+  hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null
 };
 const canvas = $('#viewport');
 const ctx = canvas.getContext('2d');
+/** @param {number} size @param {(surface: CanvasRenderingContext2D)=>void} paint @returns {CanvasPattern|string} */
+function createSurfacePattern(size, paint) {
+  const tile = document.createElement('canvas');
+  tile.width = tile.height = size;
+  const surface = tile.getContext('2d');
+  if (surface) paint(surface);
+  return ctx.createPattern(tile,'repeat') || 'transparent';
+}
+const selectionPattern = createSurfacePattern(6, surface => {
+  surface.fillStyle = '#b86622';
+  surface.beginPath();
+  surface.arc(3,3,.9,0,Math.PI*2);
+  surface.fill();
+});
+const hoverPattern = createSurfacePattern(10, surface => {
+  surface.strokeStyle = '#c8793699';
+  surface.lineWidth = 1;
+  surface.beginPath();
+  surface.moveTo(-2,8); surface.lineTo(8,-2);
+  surface.moveTo(-2,-2); surface.lineTo(8,8);
+  surface.stroke();
+});
 /** @type {QreaseeCamera} */
 const camera = { yaw: .62, pitch: .48, axes:null, scale: 40, base: 40, baseDistance:22,
   x: 0, y: 0, center:[0,0,0], distance:22, perspective:true };
@@ -142,6 +164,7 @@ function setTool(tool) {
     state.linePending=null;
     state.linePress=null;
     state.drawPending=null;
+    state.hoverKey=null;
     if (state.cursor) delete state.cursor.line;
     $('#line-length').value='';
   }
@@ -422,6 +445,7 @@ $('#line-unit').textContent=displayUnit;
 function mode(layout) {
   state.layout = layout;
   state.cursor = null;
+  state.hoverKey = null;
   state.arcPending = null;
   state.linePending = null;
   state.linePress = null;
@@ -491,6 +515,7 @@ async function openRoom(createBlank) {
   state.polling = false;
   state.peers = [];
   state.cursor = null;
+  state.hoverKey = null;
   objectBaseline = null;
   sheetBaseline = null;
   connection(false, 'Menghubungkan');
@@ -1031,6 +1056,37 @@ function pocketOpening(face,bottom,target,origin) {
   return batch([face,...oldOpening],[floor,...walls],[floor.id]);
 }
 
+function shellFromCircle(source,extruded) {
+  if (!(extruded.height>.001)) return null;
+  const solidId=identity(),normal=surfaceNormal(source);
+  const origin=[extruded.x,extruded.y,extruded.z];
+  const target=origin.map((value,i)=>value+normal[i]*extruded.height);
+  const base={...source,height:0,solid_id:solidId,opening_id:null,opening_origin:null};
+  const bottom={...base,x:origin[0],y:origin[1],z:origin[2],surface_role:'bottom',name:'Bidang bawah'};
+  const top={...base,id:identity(),x:target[0],y:target[1],z:target[2],surface_role:'top',name:'Bidang atas'};
+  const side={...base,id:identity(),x:origin[0],y:origin[1],z:origin[2],
+    height:extruded.height,surface_role:'side',name:'Sisi silinder'};
+  return {bottom,top,side,pieces:[bottom,top,side]};
+}
+
+function pullCircleTop(before,after) {
+  const side=objects().find(item=>item.solid_id===before.solid_id && item.surface_role==='side'
+    && item.shape==='circle');
+  const bottom=objects().find(item=>item.solid_id===before.solid_id && item.surface_role==='bottom');
+  if (!side || !bottom) return null;
+  const normal=surfaceNormal(before);
+  const center=[before.x,before.y,before.z];
+  const moved=after.x!==before.x || after.y!==before.y || after.z!==before.z;
+  const amount=moved?-after.height:after.height;
+  const target=center.map((value,i)=>value+normal[i]*amount);
+  const base=[bottom.x,bottom.y,bottom.z];
+  const span=Math.max(.001,normal.reduce((sum,value,i)=>sum+value*(target[i]-base[i]),0));
+  const top=base.map((value,i)=>value+normal[i]*span);
+  const newSide={...side,x:base[0],y:base[1],z:base[2],height:span};
+  const newTop={...before,x:top[0],y:top[1],z:top[2],height:0};
+  return {top:newTop,side:newSide,previous:side};
+}
+
 function commitPull(before,after) {
   if (before.solid_id && before.opening_id &&
       ['top','pocket'].includes(before.surface_role)) {
@@ -1044,6 +1100,14 @@ function commitPull(before,after) {
     const targetOffset=normal.reduce((sum,value,i)=>sum+value*(target[i]-origin[i]),0);
     if (bottom && (targetOffset<-.001 || before.surface_role==='pocket'))
       return pocketOpening(before,bottom,target,origin);
+  }
+  if (before.solid_id && before.surface_role==='top' && before.shape==='circle') {
+    const pull=pullCircleTop(before,after);
+    if (pull) return batch([before,pull.previous],[pull.top,pull.side],[pull.top.id]);
+  }
+  if (before.shape==='circle' && !before.solid_id && after.height>.001) {
+    const shell=shellFromCircle(before,after);
+    if (shell) return batch([before],shell.pieces,[shell.top.id]);
   }
   if (before.shape==='rectangle' && after.height>.001) {
     const shell=shellFromObject(before,after);
@@ -1365,8 +1429,9 @@ function scene(meshes, objects, projection) {
     if (!mesh.vertices.length) return;
     const projected = mesh.vertices.map(projection);
     const object = objects[index];
+    const smooth = object.surface_role==='side' && object.shape==='circle';
     const entries = mesh.faces.length ? mesh.faces : [[0,1]];
-    for (const face of entries) {
+    for (const [entryIndex, face] of entries.entries()) {
       const world=face.map(i=>mesh.vertices[i]);
       const visible=clip?clipNear(world):world;
       if (visible.length<Math.min(face.length,3)) continue;
@@ -1382,7 +1447,9 @@ function scene(meshes, objects, projection) {
       if (mesh.faces.length) {
         const heights = face.map(i => mesh.vertices[i][2]);
         top = heights.every(h => h === object.z+object.height);
-        if (!top) {
+        if (smooth) {
+          tone = smoothTone(world);
+        } else if (!top) {
           const a = mesh.vertices[face[0]], b = mesh.vertices[face[1]];
           tone = (b[1]-a[1]) - (b[0]-a[0]) > 0 ? .82 : .69;
         }
@@ -1392,7 +1459,9 @@ function scene(meshes, objects, projection) {
         const delta=Math.abs(index%ring-face[(i+1)%face.length]%ring);
         return delta===1 || delta===ring-1;
       }) : null;
-      faces.push({object,points,edges,world:visible,top,tone,cut:mesh.cut,depth:points.reduce((sum,p) => sum+p[2],0)/points.length});
+      faces.push({object,points,edges,world:visible,top,tone,cut:mesh.cut,
+        depth:points.reduce((sum,p) => sum+p[2],0)/points.length,
+        smooth,key:object.id+':'+index+':'+entryIndex});
     }
   });
   return orderFaces(faces);
@@ -1468,6 +1537,15 @@ function overlap(a,b) {
 function shade(color,multiplier) {
   const value = parseInt(color.slice(1),16);
   return 'rgb(' + [16,8,0].map(shift => Math.round(((value >> shift) & 255)*multiplier)).join(',') + ')';
+}
+/** @param {QreaseePoint[]} face @returns {number} */
+function smoothTone(face) {
+  const [a,b,c]=face;
+  const ab=[b[0]-a[0],b[1]-a[1],b[2]-a[2]];
+  const ac=[c[0]-a[0],c[1]-a[1],c[2]-a[2]];
+  const normal=[ab[1]*ac[2]-ab[2]*ac[1],ab[2]*ac[0]-ab[0]*ac[2],ab[0]*ac[1]-ab[1]*ac[0]];
+  const length=Math.hypot(normal[0],normal[1],normal[2])||1;
+  return .68+.24*Math.abs((normal[0]*.55+normal[1]*.45)/length);
 }
 
 function drawGrid(width,height) {
@@ -1546,10 +1624,18 @@ function draw() {
     state.hits = scene(meshes,objects,stagePoint);
     for (const face of state.hits) {
       const selected = state.selected.has(targetId(face.object));
+      const hovered = !selected && state.hoverKey &&
+        (state.hoverKey===face.key || (face.smooth && state.hoverKey===face.object.id));
       polygon(face.points);
       if (face.points.length > 2) {
         ctx.fillStyle = shade(face.object.color,face.tone);
         ctx.fill();
+        if (selected || hovered) {
+          ctx.save();
+          ctx.fillStyle = selected ? selectionPattern : hoverPattern;
+          ctx.fill();
+          ctx.restore();
+        }
       }
       ctx.strokeStyle = selected ? '#c87936' : '#4f5150';
       ctx.lineWidth = selected ? 1.65 : .8;
@@ -1561,7 +1647,7 @@ function draw() {
           ctx.lineTo(...face.points[(i+1)%face.points.length].slice(0,2));
         }
       }
-      ctx.stroke();
+      if (!face.smooth) ctx.stroke();
     }
   } else state.hits = [];
   if (drag?.tool==='select' && drag.current) {
@@ -1676,6 +1762,22 @@ function draw() {
 
 /** @param {QreaseeObject} object @returns {QreaseeMesh} */
 function previewMesh(object) {
+  if (object.shape==='circle' && object.surface_role==='side') {
+    if (object.height<=0) return {vertices:[],faces:[],cut:false};
+    const w=object.width/2, d=object.depth/2;
+    const angle=object.rotation*Math.PI/180, sin=Math.sin(angle), cos=Math.cos(angle);
+    const outline=Array.from({length:48},(_,i)=>{
+      const theta=i*Math.PI/24;
+      return [object.x+w*Math.cos(theta)*cos-d*Math.sin(theta)*sin,
+        object.y+w*Math.cos(theta)*sin+d*Math.sin(theta)*cos];
+    });
+    const vertices=/** @type {QreaseePoint[]} */ ([
+      ...outline.map(point=>/** @type {QreaseePoint} */ ([point[0],point[1],object.z])),
+      ...outline.map(point=>/** @type {QreaseePoint} */ ([point[0],point[1],object.z+object.height]))
+    ]);
+    const faces=Array.from({length:48},(_,i)=>[i,(i+1)%48,(i+1)%48+48,i+48]);
+    return {vertices,faces,cut:false};
+  }
   if (object.plane_u && object.plane_v && object.profile) {
     const u=object.plane_u,v=object.plane_v,normal=surfaceNormal(object);
     const vertices=object.profile.points.map(([a,b])=>/** @type {QreaseePoint} */ ([
@@ -2212,6 +2314,10 @@ canvas.addEventListener('pointermove',event=>{
     state.linePress=null;
     drag=state.drag;
   }
+  if (!drag && state.tool==='select' && !state.drawPending) {
+    const hovered=pickFace(point,false);
+    state.hoverKey=hovered ? (hovered.smooth ? hovered.object.id : hovered.key) : null;
+  } else state.hoverKey=null;
   if (!drag) {
     if (state.drawPending) {
       const pending=state.drawPending;
@@ -2359,7 +2465,7 @@ canvas.addEventListener('pointermove',event=>{
   }
   redraw();
 });
-canvas.addEventListener('pointerleave',()=>{if (!state.layout) state.cursor=null;state.inference=null;redraw();});
+canvas.addEventListener('pointerleave',()=>{if (!state.layout) state.cursor=null;state.hoverKey=null;state.inference=null;redraw();});
 canvas.addEventListener('dblclick',event=>{
   if (state.tool==='line' && state.linePending) { finishLine(); return; }
   if (state.tool!=='select') return;
@@ -2521,7 +2627,7 @@ function drawSheet() {
         drawing.append(svg(face.points.length===2?'polyline':'polygon',{
           points:face.points.map(([px,py])=>round(px)+','+round(py)).join(' '),
           fill:face.points.length===2?'none':mode==='iso'?shade(face.object.color,face.tone):face.cut?'#626c73':'#f6f5f0',
-          stroke:face.edges?'none':'#2e3941','stroke-width':.24,'stroke-linejoin':'round'
+          stroke:face.smooth?'none':face.edges?'none':'#2e3941','stroke-width':.24,'stroke-linejoin':'round'
         }));
         face.edges?.forEach((edge,i)=>{
           if (!edge) return;

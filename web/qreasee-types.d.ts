@@ -149,6 +149,8 @@ interface QreaseeHit {
   tone: number;
   cut: boolean;
   depth: number;
+  smooth: boolean;
+  key: string;
 }
 
 interface QreaseeCamera {
@@ -187,6 +189,7 @@ interface QreaseeState {
   linePress: any;
   drawPending: any;
   hits: QreaseeHit[];
+  hoverKey: string | null;
   epoch: number;
   polling: boolean;
   peers: QreaseePeer[];

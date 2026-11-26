@@ -262,6 +262,7 @@ impl Object {
         }
         let count = vertices.len();
         let mut faces = Vec::new();
+        let sides_only = self.surface_role.as_deref() == Some("side") && self.shape == Shape::Circle;
         let cap = self
             .profile
             .as_ref()
@@ -270,20 +271,34 @@ impl Object {
             || vec![(0..count).collect()],
             |triangles| triangles.iter().map(|triangle| triangle.to_vec()).collect(),
         );
+        if sides_only && self.height == 0.0 {
+            return Mesh {
+                vertices: Vec::new(),
+                faces: Vec::new(),
+                cut: false,
+                cap: None,
+            };
+        }
         if self.shape != Shape::Line {
             if self.height == 0.0 {
-                faces.extend(top);
+                if !sides_only {
+                    faces.extend(top);
+                }
             } else {
                 vertices.extend(layer(self.z + self.height));
-                faces.extend(top.iter().map(|face| face.iter().rev().copied().collect()));
+                if !sides_only {
+                    faces.extend(top.iter().map(|face| face.iter().rev().copied().collect()));
+                }
                 for i in 0..count {
                     let next = (i + 1) % count;
                     faces.push(vec![i, next, next + count, i + count]);
                 }
-                faces.extend(
-                    top.iter()
-                        .map(|face| face.iter().map(|index| index + count).collect()),
-                );
+                if !sides_only {
+                    faces.extend(
+                        top.iter()
+                            .map(|face| face.iter().map(|index| index + count).collect()),
+                    );
+                }
             }
         }
         Mesh {
@@ -707,6 +722,24 @@ mod tests {
         assert_eq!(mesh.faces.len(), 6);
         assert!((mesh.vertices[0][0] - 4.0).abs() < 0.0001);
         assert_eq!(mesh.vertices[4][2], 0.28);
+    }
+
+    #[test]
+    fn circle_side_mesh_omits_caps() {
+        let mut side = demo().objects.remove(0);
+        side.shape = Shape::Circle;
+        side.width = 2.0;
+        side.depth = 2.0;
+        side.z = 0.5;
+        side.height = 3.0;
+        side.solid_id = Some(uuid::Uuid::new_v4().to_string());
+        side.surface_role = Some("side".into());
+        assert!(side.valid());
+        let mesh = side.mesh();
+        assert_eq!(mesh.vertices.len(), 96);
+        assert_eq!(mesh.faces.len(), 48);
+        assert!(mesh.faces.iter().all(|face| face.len() == 4));
+        assert!(mesh.cap.is_none());
     }
 
     #[test]
