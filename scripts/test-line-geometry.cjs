@@ -69,6 +69,19 @@ assert.ok(Math.abs(covering.intersection.width*covering.intersection.depth-60)<1
 assert.ok(Math.abs(area(covering.child)-36)<1e-6);
 assert.equal(geometry.splitRectanglePair(rect(0,0,10,6),rect(20,0,2,2)),null);
 const faceMesh={vertices:[[0,0,0],[2,0,0],[2,2,0],[0,2,0]],faces:[[0,1,2,3]]};
+const wallMesh={vertices:[[0,0,0],[10,0,0],[10,10,0],[0,10,0]],faces:[[0,1,2,3]]};
+const tubeMesh={vertices:[[4,4,0],[6,4,0],[6,6,0],[4,6,0]],faces:[[0,1,2,3]]};
+const touching=geometry.connectedFaces('wall',[
+  {object:{id:'wall',shape:'rectangle'},mesh:wallMesh},
+  {object:{id:'tube',shape:'circle'},mesh:tubeMesh}
+]).sort();
+assert.equal(JSON.stringify(touching),JSON.stringify(['tube','wall']),
+  'coplanar overlapping faces connect separate solids');
+const detached=geometry.connectedFaces('wall',[
+  {object:{id:'wall',shape:'rectangle'},mesh:wallMesh},
+  {object:{id:'tube',shape:'circle'},mesh:{vertices:[[20,20,0],[22,20,0],[22,22,0],[20,22,0]],faces:[[0,1,2,3]]}}
+]);
+assert.equal(JSON.stringify(detached),JSON.stringify(['wall']));
 const boundary=geometry.boundaryLineIds(['face'],[
   {object:{id:'face',shape:'rectangle'},mesh:faceMesh},
   {object:{id:'border',shape:'line'},mesh:{vertices:[[0,0,0],[2,0,0]],faces:[]}},
