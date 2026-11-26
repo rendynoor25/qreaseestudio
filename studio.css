@@ -129,6 +129,8 @@ dialog label{margin:12px 0}
 .hint-stack{display:flex;align-items:center;gap:6px;min-width:0}
 #snap-feedback{padding:5px 8px;background:#e4f6ef;border:1px solid #87b6a6;color:#185847;border-radius:6px;font-size:11px;white-space:nowrap}
 #snap-feedback:empty{display:none}
+#snap-feedback[data-kind=endpoint]{background:#fff0df;border-color:#f0913b;color:#9c4a08}
+#snap-feedback[data-kind=midpoint]{background:#fff8cc;border-color:#e6bf19;color:#725d00}
 #container-glyph{width:36px;height:36px;border-radius:8px;background:var(--brand-dim);color:var(--brand)}
 .tree-row.child-row{padding-left:31px}
 #exit-container{margin:6px 10px;color:var(--brand)}
@@ -200,7 +202,8 @@ body{grid-template-rows:56px minmax(0,1fr)}
 .stage-metrics #coordinates{min-width:95px;justify-content:center}
 .stage-metrics .unit-control select{height:24px;background:transparent;color:#313c49;border:0;padding:0 2px}
 .line-length-control{height:30px;display:flex;align-items:center;gap:5px;padding:0 7px;background:#fafbfc;border:1px solid #b9c2ca;border-radius:7px;box-shadow:0 2px 5px #15243316;color:#313c49;font-size:11px;pointer-events:auto}
-.line-length-control input{width:58px;border:0;border-bottom:1px solid #9daab6;border-radius:0;background:transparent;color:#202a35;text-align:right;font-size:12px;outline:0}
+.line-length-control input{width:90px;border:0;border-bottom:1px solid #9daab6;border-radius:0;background:transparent;color:#202a35;text-align:right;font-size:12px;outline:0}
+.line-length-control #measure-preview{font-size:10px;color:#687581;white-space:nowrap}
 .line-length-control:focus-within{border-color:var(--brand)}
 #status{pointer-events:auto;background:#fafbfc;border:1px solid #b9c2ca;border-radius:7px;box-shadow:0 2px 5px #15243316;color:#313c49;font-size:11px;padding:7px 9px;max-width:min(350px,35vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 footer{display:flex;gap:14px;padding:0 12px;white-space:nowrap}
