@@ -1007,6 +1007,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sheet_layout_round_trips_and_rejects_invalid_dimensions() {
+        let mut sheet = demo().sheet;
+        sheet.room_title = "Ruang keluarga".into();
+        sheet.layout = Some(SheetLayout {
+            views: vec![SheetView {
+                id: "view-1".into(), mode: "plan".into(), x: 14.0, y: 14.0,
+                w: 222.0, h: 130.0, title: "DENAH".into(), grid: true,
+            }],
+            texts: vec![SheetText {
+                id: "text-1".into(), x: 20.0, y: 30.0,
+                text: "Ruang keluarga".into(), size: 4.0,
+            }],
+            dimensions: vec![SheetDimension {
+                id: "dim-1".into(), view_id: "view-1".into(),
+                a: [10.0, 10.0], b: [50.0, 10.0],
+            }],
+        });
+        assert!(sheet.valid());
+        let restored: Sheet = serde_json::from_value(serde_json::to_value(&sheet).unwrap()).unwrap();
+        assert_eq!(restored, sheet);
+        sheet.layout.as_mut().unwrap().views[0].mode = "iso".into();
+        assert!(!sheet.valid());
+    }
+
+    #[test]
     fn extrusion_has_closed_mesh_and_rotates() {
         let mut block = demo().objects.remove(0);
         block.rotation = 90.0;
