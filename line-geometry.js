@@ -34,9 +34,9 @@ var QreaseeLine = (() => {
   ));
   var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-  // node_modules/polygon-clipping/dist/polygon-clipping.umd.js
+  // ../node_modules/polygon-clipping/dist/polygon-clipping.umd.js
   var require_polygon_clipping_umd = __commonJS({
-    "node_modules/polygon-clipping/dist/polygon-clipping.umd.js"(exports, module) {
+    "../node_modules/polygon-clipping/dist/polygon-clipping.umd.js"(exports, module) {
       (function(global, factory) {
         typeof exports === "object" && typeof module !== "undefined" ? module.exports = factory() : typeof define === "function" && define.amd ? define(factory) : (global = typeof globalThis !== "undefined" ? globalThis : global || self, global.polygonClipping = factory());
       })(exports, (function() {
