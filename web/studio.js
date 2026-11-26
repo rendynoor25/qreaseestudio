@@ -43,6 +43,8 @@ const icons = {
   section:'<path d="M3 5h18v14H3z"/><path d="m4 17 16-10" stroke-dasharray="3 2"/>',
   bucket:'<path d="m5 13 7-7 6 6-7 7a2 2 0 0 1-3 0l-3-3a2 2 0 0 1 0-3z"/><path d="m9 9 6 6"/><path d="M19 15.5c1.2 1.5 1.2 2.7 0 3.5-1.2-.8-1.2-2 0-3.5z"/>',
   hidden:'<path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/><path d="m4 4 16 16"/>',
+  bulb:'<path d="M9 18h6m-5 3h4M8 14a6 6 0 1 1 8 0c-1 .8-1.5 2-1.5 3h-5c0-1-.5-2.2-1.5-3z"/>',
+  reverse:'<path d="M4 7h13m0 0-3-3m3 3-3 3M20 17H7m0 0 3-3m-3 3 3 3"/>',
   orbit:'<ellipse cx="12" cy="12" rx="9" ry="5.5" transform="rotate(-28 12 12)"/><path d="M8 4a8 8 0 0 1 12 5m-2-4 2 4 2-4M10 20a8 8 0 0 1-6-5"/>',
   pan:'<path d="M8 13V6a1.5 1.5 0 0 1 3 0v5-7a1.5 1.5 0 0 1 3 0v7-5a1.5 1.5 0 0 1 3 0v6-3a1.5 1.5 0 0 1 3 0v6c0 4-2 6-6 6h-2a5 5 0 0 1-4-2l-4-5a1.6 1.6 0 0 1 2.5-2z"/>',
   download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/>'
@@ -1526,25 +1528,29 @@ function renderSections() {
     state.textContent=hidden?'Tersembunyi':enabled?'Aktif':'Nonaktif';
     head.append(symbol,name,state);
     const actions=document.createElement('div');actions.className='section-row-actions';
-    const move=document.createElement('button');move.type='button';move.textContent='Geser';
-    move.disabled=!editable;
-    move.onclick=event=>{event.stopPropagation();beginSectionMove(section);};
-    const flip=document.createElement('button');flip.type='button';flip.textContent='Balik';
-    flip.disabled=!editable;
-    flip.onclick=event=>{event.stopPropagation();updateSection(section,
-      {normal:[-section.normal[0],-section.normal[1],-section.normal[2]]});};
     const toggle=document.createElement('button');toggle.type='button';
-    toggle.textContent=enabled?'Nonaktifkan':'Aktifkan';
+    toggle.className='section-icon-action'+(enabled?' active':'');
+    toggle.title=enabled?'Nonaktifkan bidang':'Aktifkan bidang';
+    toggle.setAttribute('aria-label',toggle.title);
     toggle.disabled=!editable;
+    icon(toggle,'bulb');
     toggle.onclick=event=>{event.stopPropagation();updateSection(section,{enabled:!enabled});};
     const hide=document.createElement('button');hide.type='button';
-    hide.textContent=hidden?'Tampilkan':'Sembunyikan';
+    hide.className='section-icon-action'+(hidden?' active':'');
+    hide.title=hidden?'Tampilkan bidang':'Sembunyikan bidang';
+    hide.setAttribute('aria-label',hide.title);
     hide.disabled=!editable;
+    icon(hide,'hidden');
     hide.onclick=event=>{event.stopPropagation();updateSection(section,{hidden:!hidden});};
-    const remove=document.createElement('button');remove.type='button';remove.className='danger';
-    remove.textContent='Hapus';remove.disabled=!editable;
-    remove.onclick=event=>{event.stopPropagation();removeSection(section);};
-    actions.append(move,flip,toggle,hide,remove);
+    const flip=document.createElement('button');flip.type='button';
+    flip.className='section-icon-action';
+    flip.title='Balik arah potong';
+    flip.setAttribute('aria-label','Balik arah potong');
+    flip.disabled=!editable;
+    icon(flip,'reverse');
+    flip.onclick=event=>{event.stopPropagation();updateSection(section,
+      {normal:[-section.normal[0],-section.normal[1],-section.normal[2]]});};
+    actions.append(toggle,hide,flip);
     row.append(head,actions);
     list.append(row);
   }
@@ -1695,6 +1701,16 @@ function drawSectionPlanes() {
       ctx.fillStyle='#fffaf2';ctx.fill();
       ctx.strokeStyle='#d6842a';ctx.lineWidth=1.7;ctx.stroke();
     }
+    const centerWorld=/** @type {QreaseePoint} */ (worldQuad.reduce((sum,corner)=>
+      sum.map((value,index)=>value+corner[index]/worldQuad.length),[0,0,0]));
+    const centerPoint=stagePoint(centerWorld);
+    if (Number.isFinite(centerPoint[0])) {
+      ctx.beginPath();ctx.arc(centerPoint[0],centerPoint[1],ghost?5:7,0,Math.PI*2);
+      ctx.fillStyle='#fffaf2';ctx.fill();
+      ctx.strokeStyle='#d6842a';ctx.lineWidth=1.7;ctx.stroke();
+      ctx.beginPath();ctx.arc(centerPoint[0],centerPoint[1],2,0,Math.PI*2);
+      ctx.fillStyle='#d6842a';ctx.fill();
+    }
     const alpha=ghost?.95:section.id==='__preview__'?.9:activeSectionId===section.id?1:.62;
     for (const corner of worldQuad)
       drawSectionNormalArrow(corner,section.normal,'#e8932a',alpha,ghost?32:28,6);
@@ -1706,14 +1722,18 @@ function drawSectionPlanes() {
   ctx.restore();
 }
 
-/** @param {QreaseePoint2} point @returns {QreaseeSectionPlane|null} */
-function sectionPlaneAt(point) {
+/** @param {QreaseePoint2} point @param {string|null=} interiorId @returns {QreaseeSectionPlane|null} */
+function sectionPlaneAt(point,interiorId=null) {
   for (const entry of sectionQuads) {
     const {quad}=entry;
     for (const corner of quad) {
       if (Math.hypot(point[0]-corner[0],point[1]-corner[1])<=38) return entry.section;
     }
-    if (pointToPolygonEdge(point,quad)<=9) return entry.section;
+    const center=quad.reduce((sum,corner)=>[sum[0]+corner[0]/quad.length,
+      sum[1]+corner[1]/quad.length],[0,0]);
+    if (Math.hypot(point[0]-center[0],point[1]-center[1])<=18) return entry.section;
+    if (pointToPolygonEdge(point,quad)<=15) return entry.section;
+    if (interiorId===entry.id&&contains(point,quad)) return entry.section;
   }
   return null;
 }
@@ -4717,7 +4737,7 @@ canvas.addEventListener('contextmenu',event=>{
   event.preventDefault();
   if (state.layout || !state.doc) return;
   const point=pointer(event);
-  const section=sectionPlaneAt(point);
+  const section=sectionPlaneAt(point,activeSectionId);
   if (section) {showSectionMenu(section,event.clientX,event.clientY);return;}
   const face=pickFace(point,false);
   if (!face) {hideObjectMenu();return;}
@@ -4741,7 +4761,7 @@ canvas.addEventListener('pointerdown',event=>{
     if(grid){selectModelGrid(grid.id);return;}
   }
   if (event.button===0 && ['select','section'].includes(tool) && !state.sectionPending) {
-    const section=sectionPlaneAt(start);
+    const section=sectionPlaneAt(start,activeSectionId);
     if (section) {
       activeSectionId=section.id;
       state.drag={tool:'section-move',start,section,base:section.origin,

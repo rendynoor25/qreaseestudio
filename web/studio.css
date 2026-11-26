@@ -464,3 +464,8 @@ body[data-theme=light] .material-option.upload{background:#fff8ef;color:#a95b19}
 .bucket-option.upload{display:grid;place-items:center;border-style:dashed;color:#c87936;font-size:20px;background:#fff8ef}
 .bucket-scale input{background:#fff;border-color:#d7dee5;height:24px}
 .bucket-grid{overflow:visible}
+.section-row-actions .section-icon-action{width:29px;height:25px;min-height:25px;padding:0;display:grid;place-items:center;color:var(--muted);border:1px solid var(--line);border-radius:5px}
+.section-row-actions .section-icon-action svg{width:15px;height:15px}
+.section-row-actions .section-icon-action.active{color:#f0a04b;border-color:#6c4a2e;background:#36271d}
+.section-row-actions .section-icon-action:hover{color:var(--text);background:#242a33}
+body[data-theme=light] .section-row-actions .section-icon-action.active{background:#fff0e4;color:#a85617;border-color:#e6ad7c}
