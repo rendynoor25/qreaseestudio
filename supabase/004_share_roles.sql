@@ -85,7 +85,7 @@ begin
 
   v_uid := auth.uid();
   v_can_manage := v_owner is null or v_owner = v_uid;
-  v_role := case when v_can_manage then 'edit'
+  v_role := case when v_owner is not null and v_owner = v_uid then 'edit'
     else coalesce(v_document->'share'->>'role', 'edit') end;
 
   if p_edit is not null then
