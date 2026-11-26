@@ -68,4 +68,12 @@ assert.equal(covering.host.length,0);
 assert.ok(Math.abs(covering.intersection.width*covering.intersection.depth-60)<1e-6);
 assert.ok(Math.abs(area(covering.child)-36)<1e-6);
 assert.equal(geometry.splitRectanglePair(rect(0,0,10,6),rect(20,0,2,2)),null);
+const faceMesh={vertices:[[0,0,0],[2,0,0],[2,2,0],[0,2,0]],faces:[[0,1,2,3]]};
+const boundary=geometry.boundaryLineIds(['face'],[
+  {object:{id:'face',shape:'rectangle'},mesh:faceMesh},
+  {object:{id:'border',shape:'line'},mesh:{vertices:[[0,0,0],[2,0,0]],faces:[]}},
+  {object:{id:'inner',shape:'line'},mesh:{vertices:[[-1,1,0],[3,1,0]],faces:[]}}
+]);
+assert.equal(JSON.stringify(boundary),JSON.stringify(['border']),
+  'triple-click boundaries include only lines lying on face edges');
 console.log('3D triangle faces, line intersections, and rectangle cuts passed');

@@ -481,6 +481,32 @@ export function connectedLines(seedId: string, lines: readonly (LineObject & { i
 }
 
 export interface MeshGeometry { vertices: Point[]; faces: number[][] }
+
+export function boundaryLineIds(
+  faceIds: readonly string[],
+  entries: readonly { object: { id: string; shape: string }; mesh: MeshGeometry }[]
+): string[] {
+  const selected = new Set(faceIds);
+  const vertexKey = (point: Point): string => point.map(value => Math.round(value * precision)).join(':');
+  const edgeKey = (a: Point, b: Point): string => [vertexKey(a), vertexKey(b)].sort().join('|');
+  const edges = new Set<string>();
+  for (const { object, mesh } of entries) {
+    if (!selected.has(object.id) || object.shape === 'line') continue;
+    for (const face of mesh.faces) {
+      for (let i = 0; i < face.length; i++) {
+        const a = mesh.vertices[face[i]], b = mesh.vertices[face[(i + 1) % face.length]];
+        if (a && b) edges.add(edgeKey(a, b));
+      }
+    }
+  }
+  const result: string[] = [];
+  for (const { object, mesh } of entries) {
+    if (object.shape !== 'line' || mesh.vertices.length < 2) continue;
+    if (edges.has(edgeKey(mesh.vertices[0], mesh.vertices[1]))) result.push(object.id);
+  }
+  return result;
+}
+
 export function connectedFaces(
   seedId: string,
   entries: readonly { object: { id: string; shape: string }; mesh: MeshGeometry }[]
