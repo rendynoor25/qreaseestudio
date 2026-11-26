@@ -21,6 +21,12 @@ publish room links, access tokens, or project exports in a public issue.
 - Room owners control the link role: edit, comment, or view.
 - Database RPC functions enforce roles server-side; client-side disabling is
   only a convenience.
+- The admin dashboard is guarded by the `qreasee_admins` allowlist inside
+  `security definer` functions. `anon` and `public` have no execute permission,
+  and the allowlist table has no direct client grants. Only the seeded
+  `rendynoorchandra@gmail.com` account starts as super admin.
+- Admin metrics expose account emails, so the dashboard is limited to the
+  allowlist and should not be screen-shared publicly.
 - Tables are not exposed directly to `anon` or `authenticated`.
 - Room identifiers are validated UUIDs before use.
 
@@ -86,7 +92,7 @@ publish room links, access tokens, or project exports in a public issue.
 
 ## Operational checklist
 
-1. Keep `supabase/001` through `supabase/006` applied in order.
+1. Keep `supabase/001` through `supabase/007` applied in order.
 2. Keep the Google OAuth client secret only in Supabase.
 3. Do not commit `.env.local` or user access tokens.
 4. Use HTTPS for any deployment reachable outside localhost.

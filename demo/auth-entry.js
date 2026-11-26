@@ -17,6 +17,22 @@ function showAccount(user) {
   gate.hidden = true;
 }
 
+async function revealAdmin(session) {
+  const link = document.querySelector('#admin-link');
+  if (!link) return;
+  try {
+    const response = await fetch(config.url + '/rest/v1/rpc/qreasee_admin_me', {
+      method: 'POST',
+      headers: { apikey: config.key, 'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + session.access_token },
+      body: '{}'
+    });
+    if (!response.ok) return;
+    const me = await response.json();
+    if (me && me.admin) link.hidden = false;
+  } catch { /* The admin dashboard may not be enabled yet. */ }
+}
+
 login.onclick = async () => {
   login.disabled = true;
   message.textContent = 'Membuka Google…';
@@ -44,6 +60,7 @@ const ready = (async () => {
   }
   sessionStorage.removeItem(pendingRoomKey);
   showAccount(data.session.user);
+  revealAdmin(data.session);
   document.querySelector('#share-dialog > p').textContent =
     'Akun Google yang memiliki tautan ini dapat mengedit proyek.';
   return data.session;

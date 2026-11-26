@@ -37,7 +37,7 @@ for (const name of ['studio.css', 'studio.js', 'line-geometry.js', 'cad-export.j
 }
 fs.copyFileSync(path.join(root, 'demo', 'demo.js'), path.join(output, 'demo.js'));
 fs.copyFileSync(path.join(root, 'demo', 'seed.json'), path.join(output, 'seed.json'));
-for (const name of ['cloud.js', 'cloud-config.js', 'auth.js', 'auth.css']) {
+for (const name of ['cloud.js', 'cloud-config.js', 'auth.js', 'auth.css', 'admin.js', 'admin.css', 'admin.html', 'admin-setup.sql']) {
   const old = path.join(output, name);
   if (fs.existsSync(old)) fs.unlinkSync(old);
 }
@@ -56,4 +56,12 @@ if (auth) {
     format: 'iife', platform: 'browser', target: 'es2022'
   });
   fs.copyFileSync(path.join(root, 'demo', 'auth.css'), path.join(output, 'auth.css'));
+  fs.copyFileSync(path.join(root, 'demo', 'admin.html'), path.join(output, 'admin.html'));
+  fs.copyFileSync(path.join(root, 'demo', 'admin.css'), path.join(output, 'admin.css'));
+  require('esbuild').buildSync({
+    entryPoints: [path.join(root, 'demo', 'admin-entry.js')],
+    outfile: path.join(output, 'admin.js'), bundle: true, minify: true,
+    format: 'iife', platform: 'browser', target: 'es2022'
+  });
+  fs.copyFileSync(path.join(root, 'supabase', '007_admin.sql'), path.join(output, 'admin-setup.sql'));
 }

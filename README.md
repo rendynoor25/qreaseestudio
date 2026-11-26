@@ -76,9 +76,26 @@ Jalankan `node scripts/build-demo.cjs` untuk menghasilkan folder `dist` berisi a
 
 Untuk menguji kolaborasi antara dua PC pada Wi-Fi yang sama, jalankan server Rust dengan `QREASEE_ADDR=0.0.0.0:8944` dan direktori `QREASEE_DATA` khusus demo. Buka `http://<IP-PC-SERVER>:8944/` pada kedua PC, buat ruang dari PC pertama, dan gunakan Bagikan untuk menyalin URL ruang yang sama. PC server harus tetap menyala; firewall Windows mungkin perlu mengizinkan koneksi masuk pada port 8944. Jangan memakai URL `127.0.0.1` di PC kedua karena alamat itu selalu menunjuk ke PC yang sedang digunakan.
 
+## Dashboard admin
+
+Halaman admin berada di `/admin.html` pada build cloud dengan Google Auth. Halaman ini hanya dapat dibaca setelah masuk dengan akun yang ada di allowlist `qreasee_admins`; email `rendynoorchandra@gmail.com` di-seed sebagai **super admin** oleh `supabase/007_admin.sql`. Link **Dashboard admin** muncul di menu akun Studio hanya untuk akun yang lolos pemeriksaan.
+
+Bagian yang tersedia:
+
+- **Ringkasan** - jumlah pengguna, proyek, objek, komentar, pengguna baru, proyek aktif 24 jam, editor online, penyimpanan dokumen, grafik aktivitas 30 hari, proyek terbesar, dan daftar editor online.
+- **Pengguna** - email, nama, tanggal bergabung, login terakhir, jumlah proyek dan objek, proyek terakhir, serta peran admin. Pencarian berdasarkan nama atau email.
+- **Proyek** - judul, pemilik, jumlah objek/komentar/bidang potong, ukuran dokumen, peran akses tautan, dan waktu pembaruan. Klik judul untuk membuka proyek di Studio.
+- **Komentar** - 200 komentar terakhir beserta penulis, proyek, status selesai, dan balasan.
+- **Sistem** - total penyimpanan, proyek terbesar, rata-rata objek, proyek kosong, distribusi akses edit/komentar/lihat, dan kesehatan RPC.
+- **Admin** - daftar administrator. Super admin dapat menambah atau menghapus admin lain; super admin terakhir tidak dapat dihapus.
+
+Tambahkan `https://<situs>/admin.html` ke **Authentication > URL Configuration > Redirect URLs** agar tombol Google kembali langsung ke dashboard. Tanpa itu, Supabase mengembalikan ke Studio dan tautan **Dashboard admin** tersedia di menu akun.
+
+Keamanan: semua fungsi memakai `security definer` dengan `search_path = ''`, memeriksa `auth.uid()` dan allowlist di dalam fungsi, serta mencabut `execute` dari `anon` dan `public`. Tabel allowlist tidak dapat dibaca langsung oleh klien. Email pengguna hanya dikirim ke pemanggil yang lolos pemeriksaan admin. Data pengguna adalah PII; jangan membagikan tangkapan layar dashboard secara publik.
+
 ## Konfigurasi Supabase
 
-Salin `.env.example` ke `.env.local`, lalu isi URL proyek dan publishable key dari Supabase. `.env.local` diabaikan Git. Jalankan `node scripts/check-supabase.cjs` untuk memeriksa koneksi tanpa mencetak key. Terapkan [`supabase/001_shared_rooms.sql`](supabase/001_shared_rooms.sql) sekali melalui SQL Editor di dashboard Supabase, lalu [`supabase/003_comments.sql`](supabase/003_comments.sql) untuk komentar, [`supabase/004_share_roles.sql`](supabase/004_share_roles.sql) untuk balasan, status selesai, serta peran akses tautan, [`supabase/005_sections.sql`](supabase/005_sections.sql) untuk bidang potong, dan [`supabase/006_security_hardening.sql`](supabase/006_security_hardening.sql) untuk pembatasan akses, rate limit pembuatan ruang, dan timeout RPC. Kunci publishable tidak punya izin untuk membuat tabel sendiri.
+Salin `.env.example` ke `.env.local`, lalu isi URL proyek dan publishable key dari Supabase. `.env.local` diabaikan Git. Jalankan `node scripts/check-supabase.cjs` untuk memeriksa koneksi tanpa mencetak key. Terapkan [`supabase/001_shared_rooms.sql`](supabase/001_shared_rooms.sql) sekali melalui SQL Editor di dashboard Supabase, lalu [`supabase/003_comments.sql`](supabase/003_comments.sql) untuk komentar, [`supabase/004_share_roles.sql`](supabase/004_share_roles.sql) untuk balasan, status selesai, serta peran akses tautan, [`supabase/005_sections.sql`](supabase/005_sections.sql) untuk bidang potong, dan [`supabase/006_security_hardening.sql`](supabase/006_security_hardening.sql) untuk pembatasan akses, rate limit pembuatan ruang, dan timeout RPC. Terapkan juga [`supabase/007_admin.sql`](supabase/007_admin.sql) untuk tabel allowlist admin, fungsi agregat, dan dashboard admin; email `rendynoorchandra@gmail.com` otomatis menjadi super admin. Kunci publishable tidak punya izin untuk membuat tabel sendiri.
 
 Untuk build demo lintas internet, set `QREASEE_CLOUD_DEMO=1`, `NEXT_PUBLIC_SUPABASE_URL`, dan `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` sebagai variabel lingkungan build Vercel. Jalankan build ulang; jangan unggah `.env.local`. Pada build lokal, dua nilai Supabase boleh dibaca dari `.env.local`. `dist/cloud-config.js` berisi publishable key yang memang ditujukan untuk browser. Tabel tidak memberi akses langsung kepada `anon`; fungsi RPC menerima UUID ruang sebagai izin edit. Tautan harus dibagikan hanya kepada peserta uji. Mode ini masih prototipe: belum ada akun pengguna, izin per anggota, pembatasan pembuatan ruang, atau ketahanan untuk beban besar. Model dan kursor diperiksa tiap 1,5 detik. Pengeditan objek berbeda dapat bergabung; pengeditan objek atau lembar yang sama menampilkan konflik. Pembentukan bidang otomatis tetap memerlukan server Rust dan belum tersedia pada demo cloud.
 
