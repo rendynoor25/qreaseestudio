@@ -50,6 +50,16 @@ const ready = (async () => {
 
 window.qreaseeAuth = {
   ready,
+  get userId() { return currentUser?.id || ''; },
+  get recentProjects() { return currentUser?.user_metadata?.qreasee_recent_projects || []; },
+  async rememberProject(project) {
+    await ready;
+    const current = Array.isArray(currentUser?.user_metadata?.qreasee_recent_projects)
+      ? currentUser.user_metadata.qreasee_recent_projects : [];
+    const recent = [project, ...current.filter(item => item.id !== project.id)].slice(0, 30);
+    const { data, error } = await supabase.auth.updateUser({ data: { qreasee_recent_projects: recent } });
+    if (!error && data.user) currentUser = data.user;
+  },
   async session() {
     await ready;
     const { data, error } = await supabase.auth.getSession();

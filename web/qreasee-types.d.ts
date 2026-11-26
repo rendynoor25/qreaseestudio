@@ -214,6 +214,9 @@ interface Window {
   qreaseeAuth?: {
     ready: Promise<unknown>;
     session(): Promise<{ access_token: string }>;
+    readonly userId: string;
+    readonly recentProjects: Array<{ id: string; title: string; updatedAt: number }>;
+    rememberProject(project: { id: string; title: string; updatedAt: number }): Promise<void>;
     readonly displayName: string;
     signOut(): Promise<void>;
   };

@@ -530,6 +530,64 @@ function roomFromHash() {
   return /^#[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(location.hash) ? location.hash.slice(1) : '';
 }
 
+const recentKey=()=> 'qreasee-recent:'+(window.qreaseeAuth?.userId || 'local');
+function recentProjects() {
+  let local=[];
+  try { local=JSON.parse(localStorage.getItem(recentKey()) || '[]'); } catch { /* Ignore damaged local history. */ }
+  const remote=window.qreaseeAuth?.recentProjects || [];
+  const merged=new Map();
+  for (const item of [...local,...remote]) {
+    if (!item || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(item.id)) continue;
+    if (!merged.has(item.id) || item.updatedAt>merged.get(item.id).updatedAt) merged.set(item.id,item);
+  }
+  return [...merged.values()].sort((a,b)=>b.updatedAt-a.updatedAt).slice(0,30);
+}
+function renderProjectHome() {
+  const list=$('#home-projects');
+  list.replaceChildren();
+  $('#home-storage-note').textContent=window.qreaseeAuth?.userId
+    ? 'Tersimpan pada akun Google Anda' : 'Tersimpan di browser ini';
+  const projects=recentProjects();
+  if (!projects.length) {
+    const empty=document.createElement('div');
+    empty.className='home-empty';
+    empty.innerHTML='<strong>Belum ada proyek terbaru</strong>Buat proyek baru untuk mulai menggambar bersama.';
+    list.append(empty);
+    return;
+  }
+  for (const project of projects) {
+    const card=document.createElement('button');
+    card.type='button';card.className='home-project-card';
+    const art=document.createElement('span');art.className='home-project-art';
+    const info=document.createElement('span');info.className='home-project-info';
+    const title=document.createElement('strong');title.textContent=project.title || 'Proyek tanpa judul';
+    const meta=document.createElement('small');
+    meta.textContent='Terakhir dibuka '+new Date(project.updatedAt).toLocaleDateString('id-ID',
+      {day:'numeric',month:'long',year:'numeric'});
+    info.append(title,meta);card.append(art,info);
+    card.onclick=()=>{history.replaceState(null,'','#'+project.id);openRoom();};
+    list.append(card);
+  }
+}
+function showProjectHome() {
+  ++state.epoch;
+  state.room='';
+  history.replaceState(null,'',location.pathname);
+  document.body.classList.add('landing');
+  renderProjectHome();
+}
+let rememberTimer;
+function rememberProject() {
+  if (!state.room || !state.doc) return;
+  const project={id:state.room,title:state.doc.sheet.title || 'Proyek tanpa judul',updatedAt:Date.now()};
+  const projects=[project,...recentProjects().filter(item=>item.id!==project.id)].slice(0,30);
+  localStorage.setItem(recentKey(),JSON.stringify(projects));
+  clearTimeout(rememberTimer);
+  if (window.qreaseeAuth?.rememberProject) {
+    rememberTimer=setTimeout(()=>window.qreaseeAuth.rememberProject(project).catch(()=>{}),1200);
+  }
+}
+
 async function openRoom(createBlank) {
   const epoch = ++state.epoch;
   if (window.qreaseeAuth) {
@@ -581,10 +639,13 @@ async function openRoom(createBlank) {
     state.room = id;
     history.replaceState(null, '', '#' + id);
     await sync();
+    if (!state.doc) throw new Error('Proyek tidak dapat dibuka. Periksa koneksi atau tautannya.');
+    if (state.doc) document.body.classList.remove('landing');
   } catch (error) {
     if (state.epoch === epoch) {
       connection(false, 'Terputus');
       showStatus(error.message || 'Server tidak dapat dihubungi. Muat ulang halaman untuk mencoba lagi.');
+      $('#home-message').textContent=error.message || 'Proyek tidak dapat dibuka.';
     }
   }
 }
@@ -593,6 +654,7 @@ function accept(data) {
   const update = data.changes;
   if (update && (!state.doc || update.document.revision >= state.doc.revision)) {
     const first = !state.doc;
+    const oldTitle=state.doc?.sheet.title;
     state.doc = update.document;
     state.meshes = update.meshes;
     state.plans = update.plans;
@@ -603,6 +665,7 @@ function accept(data) {
       showStatus('Ruang model siap.');
     }
     refresh(first);
+    if (first || oldTitle!==state.doc.sheet.title) rememberProject();
   }
   const avatars = $('#avatars');
   const peers = [...(data.peers || [])].sort((a,b) => Number(b.id === state.client) - Number(a.id === state.client));
@@ -1762,6 +1825,10 @@ $('#sheet-form').onsubmit = event => {
 
 $('#new-project').onclick = () => { $('#file-menu').open = false; openRoom(true); };
 $('#demo-project').onclick = () => { $('#file-menu').open = false; openRoom(false); };
+$('#all-projects').onclick = () => { $('#file-menu').open = false; showProjectHome(); };
+$('#home-new').onclick = () => { $('#home-message').textContent='Membuat proyek…';openRoom(true); };
+$('#home-example').onclick = () => { $('#home-message').textContent='Membuka contoh…';openRoom(false); };
+$('#home-theme').onclick = () => $('#theme-toggle').click();
 $('#share').onclick = () => {
   if (!state.room) return;
   $('#display-name').value = state.name;
@@ -3636,11 +3703,13 @@ $('#sheet').addEventListener('pointermove',event=>{
 });
 $('#sheet').addEventListener('pointerleave',()=>{if (state.layout) state.cursor=null;});
 
-window.addEventListener('hashchange',()=>openRoom());
+window.addEventListener('hashchange',()=>roomFromHash()?openRoom():showProjectHome());
 let lastSync=0;
 setInterval(()=>{
   const fast=state.linePending || state.peers.some(peer=>peer.cursor?.line);
   const interval=window.qreaseeCloudPost ? (fast?500:1500) : 350;
   if (Date.now()-lastSync>=interval) { lastSync=Date.now(); sync(); }
 },250);
-openRoom();
+if (roomFromHash()) openRoom();
+else if (window.qreaseeAuth) window.qreaseeAuth.ready.then(()=>renderProjectHome());
+else renderProjectHome();
