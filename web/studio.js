@@ -890,6 +890,144 @@ function addObject(object) {
   })),[object.id]);
 }
 
+/** @param {QreaseeObject} object @returns {QreaseePoint} */
+function surfaceNormal(object) {
+  if (!object.wall_axis) return [0,0,1];
+  const angle=object.rotation*Math.PI/180,cos=Math.cos(angle),sin=Math.sin(angle);
+  const [x,y]=object.wall_axis,u=[x*cos-y*sin,x*sin+y*cos];
+  return [u[1],-u[0],0];
+}
+/** @param {QreaseeObject} object @returns {QreaseePoint} */
+function surfaceCenter(object) {return [object.x,object.y,object.z];}
+/** @param {QreaseePoint} point @param {number[]} delta @returns {QreaseePoint} */
+function offsetPoint(point,delta) {return [point[0]+delta[0],point[1]+delta[1],point[2]+delta[2]];}
+function shiftSurface(object,delta) {
+  return {...object,x:object.x+delta[0],y:object.y+delta[1],z:object.z+delta[2]};
+}
+function connectionFaces(source,targetCenter,solidId,openingId=null,openingOrigin=null) {
+  const from=surfaceCenter(source),delta=targetCenter.map((value,i)=>value-from[i]);
+  if (Math.hypot(...delta)<.001) return [];
+  const points=previewMesh({...source,height:0}).vertices;
+  const sides=[],edges=[];
+  const opening=openingId?{opening_id:openingId,opening_origin:openingOrigin}:{};
+  for(let i=0;i<points.length;i++) {
+    const a=points[i],b=points[(i+1)%points.length];
+    const c=offsetPoint(a,delta),d=offsetPoint(b,delta);
+    const edgeVector=b.map((value,j)=>value-a[j]);
+    const edgeLength=Math.hypot(...edgeVector),offsetLength=Math.hypot(...delta);
+    if(edgeLength<.001) continue;
+    const center=[0,1,2].map(j=>(a[j]+b[j]+c[j]+d[j])/4);
+    const horizontal=[edgeVector,delta].find(vector=>Math.hypot(vector[0],vector[1])>.001);
+    const horizontalLength=Math.hypot(horizontal[0],horizontal[1]);
+    const verticalSpan=Math.max(a[2],b[2],c[2],d[2])-Math.min(a[2],b[2],c[2],d[2]);
+    const side={id:identity(),name:'Sisi '+(i+1),shape:'rectangle',
+      x:center[0],y:center[1],z:center[2],height:0,color:source.color,
+      container:source.container??null,solid_id:solidId,surface_role:'side',...opening};
+    if(verticalSpan>.001) Object.assign(side,{width:horizontalLength,depth:verticalSpan,
+      rotation:0,wall_axis:[horizontal[0]/horizontalLength,horizontal[1]/horizontalLength]});
+    else Object.assign(side,{width:edgeLength,depth:offsetLength,
+      rotation:Math.atan2(edgeVector[1],edgeVector[0])*180/Math.PI});
+    sides.push(side);
+    for(const [first,second] of [[a,b],[c,d]]) {
+      const edge=lineObject(first,second,'Tepi');
+      if(edge) edges.push({...edge,color:source.color,container:source.container??null,
+        solid_id:solidId,surface_role:'edge',...opening});
+    }
+    const upright=lineObject(a,c,'Tepi');
+    if(upright) edges.push({...upright,color:source.color,container:source.container??null,
+      solid_id:solidId,surface_role:'edge',...opening});
+  }
+  return [...sides,...edges];
+}
+
+function shellFromObject(source,extruded) {
+  const solidId=identity(),normal=surfaceNormal(source);
+  const origin=[extruded.x,extruded.y,extruded.z];
+  const target=origin.map((value,i)=>value+normal[i]*extruded.height);
+  if (!(extruded.height>.001)) return null;
+  const base={...source,height:0,solid_id:solidId,opening_id:null,opening_origin:null,
+    ...(source.profile?{profile:{...source.profile,inferred:false}}:{})};
+  const bottom={...base,x:origin[0],y:origin[1],z:origin[2],surface_role:'bottom'};
+  const top={...base,id:identity(),x:target[0],y:target[1],z:target[2],surface_role:'top'};
+  return {bottom,top,pieces:[bottom,top,...connectionFaces(bottom,target,solidId)]};
+}
+
+function insertRectangle(object,host) {
+  if (!host || targetId(host)!==host.id || state.inside !== (host.container?.id??null))
+    return addObject(object);
+  let surface=host,others=[];
+  if (host.height>0) {
+    const shell=shellFromObject(host,host);
+    if (!shell) return addObject(object);
+    surface=shell.top;
+    others=shell.pieces.filter(part=>part.id!==surface.id);
+  }
+  if (surface.height!==0) return addObject(object);
+  const strips=QreaseeLine.splitRectangle(surface,object);
+  if (!strips) return addObject(object);
+  const pieces=strips.map((geometry,index)=>({...surface,...geometry,
+    id:index===0?surface.id:identity(),name:index===0?surface.name:'Bidang tepi',
+    ...(surface.profile?{profile:null}:{})}));
+  const inner={...object,container:surface.container??null,
+    ...(surface.solid_id?{solid_id:surface.solid_id,surface_role:surface.surface_role,
+      opening_id:identity(),opening_origin:[object.x,object.y,object.z]}:{})};
+  return batch([host],[...others,...pieces,inner],[inner.id]);
+}
+
+function openingProjection(face,bottom) {
+  const normal=surfaceNormal(face);
+  const distance=normal.reduce((sum,value,i)=>sum+value*(surfaceCenter(bottom)[i]-surfaceCenter(face)[i]),0);
+  return shiftSurface({...face,height:0},normal.map(value=>value*distance));
+}
+
+function cutOpening(face,bottom,origin) {
+  const projected=openingProjection(face,bottom);
+  const bottomStrips=QreaseeLine.splitRectangle(bottom,projected);
+  if (!bottomStrips) return false;
+  const oldOpening=objects().filter(item=>item.opening_id===face.opening_id && item.id!==face.id);
+  const pieces=bottomStrips.map((geometry,index)=>({...bottom,...geometry,
+    id:index===0?bottom.id:identity(),name:index===0?bottom.name:'Bidang bawah'}));
+  const walls=connectionFaces(projected,origin,face.solid_id,face.opening_id,origin);
+  return batch([face,bottom,...oldOpening],[...pieces,...walls],[]);
+}
+
+function pocketOpening(face,bottom,target,origin) {
+  const oldOpening=objects().filter(item=>item.opening_id===face.opening_id && item.id!==face.id);
+  const normal=surfaceNormal(face);
+  const offset=normal.reduce((sum,value,i)=>sum+value*(target[i]-origin[i]),0);
+  const opposite=normal.reduce((sum,value,i)=>sum+value*(surfaceCenter(bottom)[i]-origin[i]),0);
+  if (offset>=-.001) {
+    const restored={...face,x:origin[0],y:origin[1],z:origin[2],height:0,surface_role:'top'};
+    return batch([face,...oldOpening],[restored],[restored.id]);
+  }
+  if (offset<=opposite+.001) return cutOpening(face,bottom,origin);
+  const floor={...face,x:target[0],y:target[1],z:target[2],height:0,
+    surface_role:'pocket',opening_origin:origin};
+  const walls=connectionFaces(floor,origin,face.solid_id,face.opening_id,origin);
+  return batch([face,...oldOpening],[floor,...walls],[floor.id]);
+}
+
+function commitPull(before,after) {
+  if (before.solid_id && before.opening_id &&
+      ['top','pocket'].includes(before.surface_role)) {
+    const origin=before.opening_origin??surfaceCenter(before),normal=surfaceNormal(before);
+    const bottom=objects().find(item=>item.solid_id===before.solid_id && item.surface_role==='bottom'
+      && item.shape==='rectangle' &&
+      QreaseeLine.splitRectangle(item,openingProjection(before,item)));
+    const base=surfaceCenter(after);
+    const baseOffset=normal.reduce((sum,value,i)=>sum+value*(base[i]-origin[i]),0);
+    const target=baseOffset<-.001?base:base.map((value,i)=>value+normal[i]*after.height);
+    const targetOffset=normal.reduce((sum,value,i)=>sum+value*(target[i]-origin[i]),0);
+    if (bottom && (targetOffset<-.001 || before.surface_role==='pocket'))
+      return pocketOpening(before,bottom,target,origin);
+  }
+  if (before.shape==='rectangle' && after.height>.001) {
+    const shell=shellFromObject(before,after);
+    if (shell) return batch([before],shell.pieces,[shell.top.id]);
+  }
+  return edit(before,after);
+}
+
 function enterContainer(id) {
   if (!members(id).length) return;
   state.inside=id;
@@ -1716,7 +1854,10 @@ function shapePreview(drag,b) {
   if (size?.invalid) return null;
   const dx=b[0]-a[0],dy=b[1]-a[1],radius=Math.hypot(dx,dy);
   if (tool==='rectangle') {
-    const geometry=size
+    const dimensions=size?{x:size.primary,y:size.secondary}:undefined;
+    const geometry=drag.host?.shape==='rectangle' && (!drag.wall || drag.host.wall_axis)
+      ? QreaseeLine.rectangleInFrame(a,b,drag.host,dimensions)
+      : size
       ? QreaseeLine.measuredRectangle(a,b,size.primary,size.secondary,drag.wall?.axis)
       : drag.wall ? QreaseeLine.verticalRectangle(a,b,drag.wall.axis)
       : {x:(a[0]+b[0])/2,y:(a[1]+b[1])/2,z:a[2],width:Math.abs(dx),depth:Math.abs(dy)};
@@ -1739,8 +1880,9 @@ function shapePreview(drag,b) {
 function pullChange(drag,point) {
   const size=measurement('pull');
   if (size?.invalid) return null;
-  const {x,y,z,height}=drag.object;
-  const current=stagePoint([x,y,z+height]),next=stagePoint([x,y,z+height+1]);
+  const {height}=drag.object,normal=surfaceNormal(drag.object),base=surfaceCenter(drag.object);
+  const current=stagePoint(offsetPoint(base,normal.map(value=>value*height)));
+  const next=stagePoint(offsetPoint(base,normal.map(value=>value*(height+1))));
   const direction=[next[0]-current[0],next[1]-current[1]];
   const movement=[point[0]-drag.start[0],point[1]-drag.start[1]];
   const projected=movement[0]*direction[0]+movement[1]*direction[1];
@@ -1749,7 +1891,7 @@ function pullChange(drag,point) {
   const amount=size ? Math.sign(projected)*size.primary :
     (state.snapping?snap(projected/magnitude,.05):round(projected/magnitude));
   return height===0 && amount<0
-    ? {...drag.object,z:z+amount,height:-amount}
+    ? {...shiftSurface(drag.object,normal.map(value=>value*amount)),height:-amount}
     : {...drag.object,height:Math.max(0,height+amount)};
 }
 
@@ -1840,7 +1982,7 @@ canvas.addEventListener('pointerdown',event=>{
       if (!update) {showStatus('Klik pada arah tarik yang jelas.');return;}
       state.drawPending=null;
       $('#line-length').value='';
-      edit(pending.object,update);
+      commitPull(pending.object,update);
       return;
     }
     const candidate=drawingCandidate(pending,start);
@@ -1866,7 +2008,8 @@ canvas.addEventListener('pointerdown',event=>{
     }
     state.drawPending=null;
     $('#line-length').value='';
-    addObject(object);
+    if (tool==='rectangle') insertRectangle(object,pending.host);
+    else addObject(object);
     redraw();
     return;
   }
@@ -1968,8 +2111,8 @@ canvas.addEventListener('pointerdown',event=>{
       select(id);
       state.drag={tool,start,object,sources,pivot,initial:Math.atan2(initial[1]-pivot[1],initial[0]-pivot[0])};
     } else if (tool==='pull' || tool==='move') {
-      if (!object || (tool==='pull' && !face.top)) {
-        showStatus(tool==='pull'?'Pilih permukaan horizontal atas.':'Pilih objek yang akan dipindah.');
+      if (!object || (tool==='pull' && !face.top && !object.wall_axis)) {
+        showStatus(tool==='pull'?'Pilih bidang yang akan ditarik.':'Pilih objek yang akan dipindah.');
         return;
       }
       if (tool==='pull' && targetId(object)!==object.id) {
@@ -1998,14 +2141,20 @@ canvas.addEventListener('pointerdown',event=>{
         if (wall) {
           const initial=pointOnVerticalPlane(start,wall.origin,wall.normal);
           if (!initial) {showStatus('Arah pandang sejajar bidang vertikal. Putar kamera sedikit.');return;}
-          state.drag={tool,start,initial,id:identity(),wall};
+          state.drag={tool,start,initial,id:identity(),wall,host:face.object};
           canvas.setPointerCapture(event.pointerId);
           return;
         }
       }
-      const initial=drawingPoint(start);
+      const planeZ=tool==='rectangle' && face && face.world.length>=3 &&
+        face.world.every(vertex=>Math.abs(vertex[2]-face.world[0][2])<.00001)
+        ?face.world[0][2]:null;
+      const pointOnFace=planeZ===null?null:ground(start,planeZ);
+      const initial=pointOnFace
+        ?{world:[...(state.snapping?pointOnFace.map(value=>snap(value)):pointOnFace),planeZ]}
+        :drawingPoint(start);
       if (!initial) { showStatus('Gunakan denah atau aksonometri untuk menggambar.');return; }
-      state.drag={tool,start,initial:initial.world,id:identity()};
+      state.drag={tool,start,initial:initial.world,id:identity(),host:tool==='rectangle'?face?.object:null};
     }
   }
   canvas.setPointerCapture(event.pointerId);
@@ -2212,11 +2361,16 @@ canvas.addEventListener('pointerup',()=>{
     const object=drag.preview;
     const valid=object.shape==='line' ? Math.hypot(object.width,object.depth,object.height)>.001
       : object.width>.001 && object.depth>.001;
-    if (valid) {addObject(object);$('#line-length').value='';}
+    if (valid) {
+      if (drag.tool==='rectangle') insertRectangle(object,drag.host);
+      else addObject(object);
+      $('#line-length').value='';
+    }
   } else if (drag?.updates && drag.updates.some((object,i)=>JSON.stringify(object)!==JSON.stringify(drag.sources[i]))) {
     if (['move','rotate','scale'].includes(drag.tool) && targetId(drag.object)!==drag.object.id) {
       batch(drag.sources,drag.updates,[targetId(drag.object)]);
-    } else edit(drag.object,drag.updates[0]);
+    } else if (drag.tool==='pull') commitPull(drag.object,drag.updates[0]);
+    else edit(drag.object,drag.updates[0]);
     if (drag.tool==='pull') $('#line-length').value='';
   } else if (drag && ['rectangle','circle','arc','pull'].includes(drag.tool)) {
     state.drawPending={...drag,preview:null,previewArc:null,updates:null};

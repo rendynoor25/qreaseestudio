@@ -53,6 +53,68 @@ export function measuredRectangle(a: Point, b: Point, x: number, y: number, wall
     y: a[1] + Math.sign(dy) * y / 2, z: a[2], width: x, depth: y };
 }
 
+export interface RectFace {
+  shape: string; x: number; y: number; z: number;
+  width: number; depth: number; height: number; rotation: number;
+  wall_axis?: XY | null;
+}
+
+function frame(face: RectFace): { u: Point; v: Point; n: Point } {
+  const angle = face.rotation * Math.PI / 180, cos = Math.cos(angle), sin = Math.sin(angle);
+  if (face.wall_axis) {
+    const [x, y] = face.wall_axis;
+    const u: Point = [x * cos - y * sin, x * sin + y * cos, 0];
+    return { u, v: [0, 0, 1], n: [u[1], -u[0], 0] };
+  }
+  return { u: [cos, sin, 0], v: [-sin, cos, 0], n: [0, 0, 1] };
+}
+
+const dot3 = (a: readonly number[], b: readonly number[]): number =>
+  a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+export function rectangleInFrame(a: Point, b: Point, face: RectFace,
+  dimensions?: { x: number; y: number }): RectFace | null {
+  const { u, v } = frame(face);
+  const delta = b.map((value, i) => value - a[i]);
+  const along = dot3(delta, u), across = dot3(delta, v);
+  if (Math.abs(along) < 1e-9 || Math.abs(across) < 1e-9) return null;
+  const width = dimensions?.x ?? Math.abs(along), depth = dimensions?.y ?? Math.abs(across);
+  const center = a.map((value, i) => value +
+    (Math.sign(along) * width * u[i] + Math.sign(across) * depth * v[i]) / 2);
+  return { shape: 'rectangle', x: center[0], y: center[1], z: center[2],
+    width, depth, height: 0, rotation: face.rotation,
+    ...(face.wall_axis ? { wall_axis: face.wall_axis } : {}) };
+}
+
+export function splitRectangle(host: RectFace, child: RectFace):
+  { x: number; y: number; z: number; width: number; depth: number }[] | null {
+  if (host.shape !== 'rectangle' || child.shape !== 'rectangle' ||
+      host.height !== 0 || child.height !== 0 ||
+      Boolean(host.wall_axis) !== Boolean(child.wall_axis)) return null;
+  const outer = frame(host), inner = frame(child);
+  if (Math.abs(dot3(outer.u, inner.u)) < 1 - 1e-5 ||
+      Math.abs(dot3(outer.v, inner.v)) < 1 - 1e-5) return null;
+  const delta = [child.x - host.x, child.y - host.y, child.z - host.z];
+  if (Math.abs(dot3(delta, outer.n)) > 1e-4) return null;
+  const centerU = dot3(delta, outer.u), centerV = dot3(delta, outer.v);
+  const [left, right] = [centerU - child.width / 2, centerU + child.width / 2];
+  const [bottom, top] = [centerV - child.depth / 2, centerV + child.depth / 2];
+  const w = host.width / 2, d = host.depth / 2;
+  if (left <= -w + 1e-4 || right >= w - 1e-4 ||
+      bottom <= -d + 1e-4 || top >= d - 1e-4) return null;
+  const regions = [
+    [-w, left, -d, d], [right, w, -d, d],
+    [left, right, -d, bottom], [left, right, top, d]
+  ];
+  return regions.map(([u0, u1, v0, v1]) => {
+    const u = (u0 + u1) / 2, v = (v0 + v1) / 2;
+    return { x: host.x + u * outer.u[0] + v * outer.v[0],
+      y: host.y + u * outer.u[1] + v * outer.v[1],
+      z: host.z + u * outer.u[2] + v * outer.v[2],
+      width: u1 - u0, depth: v1 - v0 };
+  });
+}
+
 export function radiusArc(center: Point, direction: Point, radius: number, angleDegrees = 90): Point[] {
   const dx = direction[0] - center[0], dy = direction[1] - center[1];
   const length = Math.hypot(dx, dy);
@@ -75,6 +137,7 @@ export interface LineObject {
   height: number;
   rotation: number;
   container?: { id: string } | null;
+  solid_id?: string | null;
 }
 
 const precision = 100_000;
@@ -153,14 +216,14 @@ export function triangulate(points: readonly XY[]): [number, number, number][] {
 }
 
 export function closedLoop(existing: readonly LineObject[], edge: LineObject): Point[] | null {
-  if (edge.shape !== 'line' || Math.abs(edge.height) > 1e-5) return null;
+  if (edge.shape !== 'line' || edge.solid_id || Math.abs(edge.height) > 1e-5) return null;
   const [a, b] = endpoints(edge);
   const start = key(b), goal = key(a);
   if (start === goal) return null;
   const adjacency = new Map<string, Set<string>>();
   const points = new Map<string, Point>();
   for (const line of existing) {
-    if (line.shape !== 'line' || Math.abs(line.height) > 1e-5 ||
+    if (line.shape !== 'line' || line.solid_id || Math.abs(line.height) > 1e-5 ||
         Math.abs(line.z - edge.z) > 1e-5 ||
         (line.container?.id ?? null) !== (edge.container?.id ?? null)) continue;
     const [first, second] = endpoints(line);

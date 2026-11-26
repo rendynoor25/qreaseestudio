@@ -82,7 +82,7 @@ fn segments(objects: &[Object]) -> BTreeMap<(Option<String>, i64), Vec<[Vertex; 
     let mut planes = BTreeMap::<_, Vec<_>>::new();
     for object in objects
         .iter()
-        .filter(|object| object.shape == Shape::Line && object.height == 0.0)
+        .filter(|object| object.shape == Shape::Line && object.height == 0.0 && object.solid_id.is_none())
     {
         let points = object.footprint();
         let mut pair = [vertex(points[0]), vertex(points[1])];
@@ -325,6 +325,10 @@ fn new_face(region: &Loop) -> Option<Object> {
             inferred: true,
         })),
         wall_axis: None,
+        solid_id: None,
+        surface_role: None,
+        opening_id: None,
+        opening_origin: None,
     };
     object.valid().then_some(object)
 }
@@ -371,6 +375,7 @@ fn add_faces<'a>(
         .iter()
         .filter(|object| {
             object.height == 0.0
+                && object.solid_id.is_none()
                 && object.wall_axis.is_none()
                 && matches!(object.shape, Shape::Polygon | Shape::Rectangle)
         })
@@ -450,6 +455,10 @@ mod tests {
             container: None,
             profile: None,
             wall_axis: None,
+            solid_id: None,
+            surface_role: None,
+            opening_id: None,
+            opening_origin: None,
         }
     }
 

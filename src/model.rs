@@ -62,6 +62,14 @@ pub struct Object {
     pub profile: Option<Box<Profile>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wall_axis: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub solid_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface_role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening_origin: Option<Point>,
 }
 
 #[derive(Serialize)]
@@ -91,6 +99,18 @@ impl Object {
                 self.shape == Shape::Rectangle
                     && axis.iter().all(|value| value.is_finite())
                     && (axis[0].hypot(axis[1]) - 1.0).abs() < 1e-5
+            })
+            && self.solid_id.as_ref().is_none_or(|id| uuid::Uuid::parse_str(id).is_ok())
+            && self.surface_role.as_ref().is_none_or(|role| {
+                self.solid_id.is_some()
+                    && matches!(role.as_str(), "top" | "bottom" | "side" | "edge" | "pocket")
+                    && (role == "edge") == (self.shape == Shape::Line)
+            })
+            && self.opening_id.as_ref().is_none_or(|id| {
+                self.solid_id.is_some() && uuid::Uuid::parse_str(id).is_ok()
+            })
+            && self.opening_origin.is_none_or(|point| {
+                self.opening_id.is_some() && point.iter().copied().all(bounded)
             })
             && self.container.as_deref().is_none_or(Membership::valid)
             && match (&self.shape, &self.profile) {
@@ -546,6 +566,10 @@ pub fn demo() -> Document {
             container: None,
             profile: None,
             wall_axis: None,
+            solid_id: None,
+            surface_role: None,
+            opening_id: None,
+            opening_origin: None,
         });
     };
     block("Pelat dasar", [0., 0., 0., 13., 8., 0.28], "#c1b5a2");
