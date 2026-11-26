@@ -4009,6 +4009,30 @@ function draw() {
       state.hits=scene(meshes,objects,stagePoint);
       if(!updates) sceneCache={meshes,objects,key:sceneKey,faces:state.hits};
     }
+    const pocketFloors=new Map(state.hits.filter(face=>face.object.opening_id &&
+      face.object.surface_role==='pocket').map(face=>[face.object.opening_id,face.object]));
+    const segmentKey=(a,b)=>{
+      const first=a.map(value=>Math.round(value*10000)/10000);
+      const second=b.map(value=>Math.round(value*10000)/10000);
+      return JSON.stringify([first,second].sort());
+    };
+    const pocketRim=new Set();
+    if (pocketFloors.size) {
+      for (const face of state.hits) {
+        const object=face.object;
+        const floor=pocketFloors.get(object?.opening_id);
+        if (!floor||object.surface_role!=='side'||face.world.length<2) continue;
+        const origin=object.opening_origin||floor.opening_origin||[floor.x,floor.y,floor.z];
+        const normal=surfaceNormal(floor);
+        const onPlane=point=>Math.abs(dotPoint([point[0]-origin[0],point[1]-origin[1],
+          point[2]-origin[2]],normal))<1e-4;
+        for (let index=0;index<face.world.length;index++) {
+          const next=(index+1)%face.world.length;
+          if (onPlane(face.world[index])&&onPlane(face.world[next]))
+            pocketRim.add(segmentKey(face.world[index],face.world[next]));
+        }
+      }
+    }
     for (const face of state.hits) {
       const selected = state.selected.has(targetId(face.object));
       const hovered = !selected && state.hoverKey &&
@@ -4035,15 +4059,19 @@ function draw() {
         state.showHidden ? '#7f8a94' :
         selected ? '#c87936' : dark ? '#aeb3b7' : '#4f5150';
       ctx.lineWidth = hiddenFace ? 1.6 : face.section ? 1.35 : selected ? 1.65 : .8;
-      if (face.edges) {
+      if (!face.smooth && !face.quiet) {
         ctx.beginPath();
-        for (let i=0;i<face.edges.length;i++) {
-          if (!face.edges[i]) continue;
+        const world=face.world;
+        for (let i=0;i<face.points.length;i++) {
+          if (face.edges && !face.edges[i]) continue;
+          const next=(i+1)%face.points.length;
+          if (pocketRim.size&&world.length===face.points.length&&
+              pocketRim.has(segmentKey(world[i],world[next]))) continue;
           ctx.moveTo(...face.points[i].slice(0,2));
-          ctx.lineTo(...face.points[(i+1)%face.points.length].slice(0,2));
+          ctx.lineTo(...face.points[next].slice(0,2));
         }
+        ctx.stroke();
       }
-      if (!face.smooth && !face.quiet) ctx.stroke();
     }
     if (state.tool==='offset'&&state.offsetHover?.edge) {
       const [a,b]=state.offsetHover.edge;
