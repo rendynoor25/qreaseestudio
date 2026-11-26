@@ -174,7 +174,11 @@ function showGate(kind, detail = {}) {
     download.href = './admin-setup.sql';
     download.target = '_blank';
     download.rel = 'noopener';
-    extra.append(download);
+    const editor = element('a', 'button ghost', 'Buka SQL Editor');
+    editor.href = 'https://supabase.com/dashboard/project/aalfaqitfmhujoludqsr/sql/new';
+    editor.target = '_blank';
+    editor.rel = 'noopener';
+    extra.append(download, editor);
     const retry = element('button', 'button primary', 'Muat ulang');
     retry.type = 'button';
     retry.onclick = () => location.reload();
