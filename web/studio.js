@@ -2687,17 +2687,26 @@ function onFaceBoundary(point,vertices) {
 function infer(point, elevation, excluded = new Set(), accept) {
   if (!state.snapping) return null;
   let best=null;
-  const add=(world,label,penalty,owner)=>{
+  const add=(world,label,tier,owner)=>{
     if (elevation!==undefined && Math.abs(world[2]-elevation)>.00001) return;
     if (accept && !accept(world)) return;
     const projected=stagePoint(world);
+    if (!Number.isFinite(projected[0]) || !Number.isFinite(projected[1])) return;
     const distance=Math.hypot(projected[0]-point[0],projected[1]-point[1]);
-    if (!(distance<=snapRadius) || (best && distance+penalty>=best.score)) return;
+    if (!(distance<=snapRadius)) return;
     const hit=state.hits.findLast(face=>!excluded.has(face.object.id) && contains(projected,face.points));
     if (hit && hit.object.id!==owner &&
         !(hit.object.shape==='polygon' && hit.object.height===0 && Math.abs(hit.object.z-world[2])<.00001) &&
         !onFaceBoundary(world,hit.world)) return;
-    best={world,label,score:distance+penalty};
+    const depth=Number.isFinite(projected[2])?projected[2]:-Infinity;
+    if (best) {
+      if (tier>best.tier) return;
+      if (tier===best.tier) {
+        if (distance>best.distance+.5) return;
+        if (distance>=best.distance-.5 && depth<=best.depth) return;
+      }
+    }
+    best={world,label,tier,distance,depth};
   };
   const interpolate=(a,b,t)=>a.map((value,i)=>value+(b[i]-value)*t);
   for (const face of state.hits) {
@@ -2710,12 +2719,12 @@ function infer(point, elevation, excluded = new Set(), accept) {
       const owner=face.object.id;
       add(a,'Ujung',0,owner);
       if (count===2) add(b,'Ujung',0,owner);
-      add(interpolate(a,b,.5),'Titik tengah',2,owner);
+      add(interpolate(a,b,.5),'Titik tengah',1,owner);
       const length=dx*dx+dy*dy;
       if (length<.01) continue;
       const fraction=clamp(((point[0]-p[0])*dx+(point[1]-p[1])*dy)/length,0,1);
       const t=fraction*p[3]/((1-fraction)*q[3]+fraction*p[3]);
-      add(interpolate(a,b,t),'Pada tepi',snapRadius+2,owner);
+      add(interpolate(a,b,t),'Pada tepi',2,owner);
     }
   }
   return best;
@@ -3060,7 +3069,7 @@ canvas.addEventListener('pointerdown',event=>{
     }
     const object=face?.object;
     if (tool==='measure') {
-      const origin=drawingPoint(start);
+      const origin=infer(start,undefined) || drawingPoint(start);
       if (!origin) {showStatus('Gunakan denah atau tampilan 3D untuk mengukur.');return;}
       state.measurePending={origin:origin.world,elevation:origin.world[2],end:null,distance:0};
       state.inference=origin.label?origin:null;
@@ -3147,10 +3156,11 @@ canvas.addEventListener('pointermove',event=>{
   if (!drag) {
     if (state.measurePending) {
       const pending=state.measurePending;
-      const candidate=drawingPoint(point,pending.elevation);
+      const candidate=infer(point,undefined) || drawingPoint(point,pending.elevation);
       pending.end=candidate?.world||null;
       pending.distance=pending.end
-        ? Math.hypot(pending.end[0]-pending.origin[0],pending.end[1]-pending.origin[1]) : 0;
+        ? Math.hypot(pending.end[0]-pending.origin[0],pending.end[1]-pending.origin[1],
+          pending.end[2]-pending.origin[2]) : 0;
       state.inference=candidate?.label?candidate:null;
       if (pending.end) {
         state.cursor={mode:'model',x:round(pending.end[0]),y:round(pending.end[1]),z:round(pending.end[2])};
