@@ -32,6 +32,7 @@ var QreaseeLine = (() => {
     rectangleInFrame: () => rectangleInFrame,
     splitCrossingLines: () => splitCrossingLines,
     splitRectangle: () => splitRectangle,
+    splitRectanglePair: () => splitRectanglePair,
     triangulate: () => triangulate,
     verticalRectangle: () => verticalRectangle,
     verticalWall: () => verticalWall
@@ -136,13 +137,14 @@ var QreaseeLine = (() => {
     const [left, right] = [centerU - child.width / 2, centerU + child.width / 2];
     const [bottom, top] = [centerV - child.depth / 2, centerV + child.depth / 2];
     const w = host.width / 2, d = host.depth / 2;
-    if (left <= -w + 1e-4 || right >= w - 1e-4 || bottom <= -d + 1e-4 || top >= d - 1e-4) return null;
-    const regions = [
-      [-w, left, -d, d],
-      [right, w, -d, d],
-      [left, right, -d, bottom],
-      [left, right, top, d]
-    ];
+    const cutLeft = Math.max(-w, left), cutRight = Math.min(w, right);
+    const cutBottom = Math.max(-d, bottom), cutTop = Math.min(d, top);
+    if (cutRight - cutLeft <= 1e-4 || cutTop - cutBottom <= 1e-4) return null;
+    const regions = [];
+    if (cutLeft > -w + 1e-4) regions.push([-w, cutLeft, -d, d]);
+    if (cutRight < w - 1e-4) regions.push([cutRight, w, -d, d]);
+    if (cutBottom > -d + 1e-4) regions.push([cutLeft, cutRight, -d, cutBottom]);
+    if (cutTop < d - 1e-4) regions.push([cutLeft, cutRight, cutTop, d]);
     return regions.map(([u0, u1, v0, v1]) => {
       const u = (u0 + u1) / 2, v = (v0 + v1) / 2;
       return {
@@ -153,6 +155,34 @@ var QreaseeLine = (() => {
         depth: v1 - v0
       };
     });
+  }
+  function splitRectanglePair(host, child) {
+    if (host.shape !== "rectangle" || child.shape !== "rectangle" || host.height !== 0 || child.height !== 0 || Boolean(host.wall_axis) !== Boolean(child.wall_axis)) return null;
+    const outer = frame(host), inner = frame(child);
+    if (Math.abs(dot3(outer.u, inner.u)) < 1 - 1e-5 || Math.abs(dot3(outer.v, inner.v)) < 1 - 1e-5) return null;
+    const delta = [child.x - host.x, child.y - host.y, child.z - host.z];
+    if (Math.abs(dot3(delta, outer.n)) > 1e-4) return null;
+    const centerU = dot3(delta, outer.u), centerV = dot3(delta, outer.v);
+    const w = host.width / 2, d = host.depth / 2;
+    const cutLeft = Math.max(-w, centerU - child.width / 2);
+    const cutRight = Math.min(w, centerU + child.width / 2);
+    const cutBottom = Math.max(-d, centerV - child.depth / 2);
+    const cutTop = Math.min(d, centerV + child.depth / 2);
+    if (cutRight - cutLeft <= 1e-4 || cutTop - cutBottom <= 1e-4) return null;
+    const u = (cutLeft + cutRight) / 2, v = (cutBottom + cutTop) / 2;
+    const intersection = {
+      x: host.x + u * outer.u[0] + v * outer.v[0],
+      y: host.y + u * outer.u[1] + v * outer.v[1],
+      z: host.z + u * outer.u[2] + v * outer.v[2],
+      width: cutRight - cutLeft,
+      depth: cutTop - cutBottom
+    };
+    const overlap = { ...host, ...intersection };
+    return {
+      host: splitRectangle(host, overlap) ?? [],
+      child: splitRectangle(child, overlap) ?? [],
+      intersection
+    };
   }
   function radiusArc(center, direction, radius, angleDegrees = 90) {
     const dx = direction[0] - center[0], dy = direction[1] - center[1];
@@ -271,7 +301,13 @@ var QreaseeLine = (() => {
       if (line !== incoming) before.push(line);
       after.push(...pieces);
     }
-    return { before, after };
+    const unique = /* @__PURE__ */ new Map();
+    for (const piece of after) {
+      const [start, end] = endpoints(piece);
+      const identity = [key(start), key(end)].sort().join("|");
+      if (!unique.has(identity)) unique.set(identity, piece);
+    }
+    return { before, after: [...unique.values()] };
   }
   function triangulate(points) {
     const remaining = points.map((_, index) => index);
