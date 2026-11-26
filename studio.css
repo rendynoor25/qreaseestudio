@@ -440,3 +440,25 @@ body[data-theme=light] .material-swatch{border-color:#0000001f}
 #viewport[data-tool=bucket]{cursor:copy}
 .section-row.hidden{opacity:.62}.section-row.hidden .section-symbol{background:#7c858e;color:#eef1f3}
 #hidden-toggle.active{color:#e8932a;background:#3a2a18}
+
+/* Square material thumbnails */
+.material-grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
+.material-option{position:relative;aspect-ratio:1;min-height:0;padding:2px;border-radius:5px;justify-content:center}
+.material-option .material-swatch{width:100%;height:100%;border-radius:3px}
+.material-option>span:last-child{display:none}
+.material-option::after{content:attr(data-name);position:absolute;left:50%;bottom:calc(100% + 5px);transform:translateX(-50%);z-index:12;background:#161b20;color:#fff;border:1px solid #ffffff2b;border-radius:4px;padding:3px 6px;font-size:9px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .08s}
+.material-option:hover::after{opacity:1}
+.material-option.upload{display:grid;place-items:center;border-style:dashed;color:#c87936;font-size:20px;font-weight:350;background:#1a1e25}
+.material-option.upload:hover{background:#2b2118;border-color:#d6842a}
+body[data-theme=light] .material-option.upload{background:#fff8ef;color:#a95b19}
+.material-scale,.bucket-scale{display:flex!important;align-items:center;gap:5px;margin:8px 0 0!important;font-size:10px;color:var(--muted)}
+.material-scale input,.bucket-scale input{width:58px!important;height:25px;padding:2px 5px!important;border:1px solid #b9c2ca;border-radius:5px;background:#fff;color:#26303a;text-align:right;font-size:11px}
+.bucket-grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;max-height:196px}
+.bucket-option{position:relative;aspect-ratio:1;min-height:0;padding:2px;justify-content:center;border-radius:5px}
+.bucket-option .material-swatch{width:100%;height:100%;border-radius:3px}
+.bucket-option>span:last-child{display:none}
+.bucket-option::after{content:attr(data-name);position:absolute;left:50%;bottom:calc(100% + 4px);transform:translateX(-50%);z-index:12;background:#161b20;color:#fff;border:1px solid #ffffff2b;border-radius:4px;padding:3px 6px;font-size:9px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .08s}
+.bucket-option:hover::after{opacity:1}
+.bucket-option.upload{display:grid;place-items:center;border-style:dashed;color:#c87936;font-size:20px;background:#fff8ef}
+.bucket-scale input{background:#fff;border-color:#d7dee5;height:24px}
+.bucket-grid{overflow:visible}

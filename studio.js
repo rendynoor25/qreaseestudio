@@ -124,25 +124,66 @@ const perspectiveFov = 35*Math.PI/180;
 const nearPlane = .01;
 const unitFactors = {m:1,cm:100,mm:1000};
 let displayUnit = unitFactors[localStorage.getItem('qreasee-unit')] ? localStorage.getItem('qreasee-unit') : 'm';
-/** @type {{id: QreaseeMaterial, name: string, color: string, pattern: string}[]} */
+/** @type {{id: QreaseeMaterial, name: string, color: string, pattern: string, tileCm: number, image?: string}[]} */
 const materialPresets = [
-  {id:'brick',name:'Bata merah',color:'#a9553f',pattern:'brick'},
-  {id:'hebel',name:'Hebel / AAC',color:'#d8d4c7',pattern:'block'},
-  {id:'timber',name:'Kayu',color:'#a77643',pattern:'timber'},
-  {id:'zinc',name:'Seng',color:'#9aa3a7',pattern:'zinc'},
-  {id:'clay_tile',name:'Genteng tanah liat',color:'#b5502f',pattern:'tile'},
-  {id:'concrete_tile',name:'Genteng beton',color:'#777b7e',pattern:'tile'},
-  {id:'glass',name:'Kaca',color:'#b7d7e2',pattern:'glass'},
-  {id:'grass',name:'Rumput',color:'#6e8e4b',pattern:'grass'},
-  {id:'sand',name:'Pasir',color:'#d7c28e',pattern:'sand'},
-  {id:'asphalt',name:'Aspal',color:'#4d5154',pattern:'asphalt'},
-  {id:'metal',name:'Logam',color:'#959da3',pattern:'metal'},
-  {id:'paint',name:'Cat dasar',color:'#d7d9db',pattern:'paint'}
+  {id:'brick',name:'Bata merah',color:'#a9553f',pattern:'brick',tileCm:20},
+  {id:'hebel',name:'Hebel / AAC',color:'#d8d4c7',pattern:'block',tileCm:60},
+  {id:'timber',name:'Kayu',color:'#a77643',pattern:'timber',tileCm:30},
+  {id:'zinc',name:'Seng',color:'#9aa3a7',pattern:'zinc',tileCm:90},
+  {id:'clay_tile',name:'Genteng tanah liat',color:'#b5502f',pattern:'tile',tileCm:30},
+  {id:'concrete_tile',name:'Genteng beton',color:'#777b7e',pattern:'tile',tileCm:30},
+  {id:'glass',name:'Kaca',color:'#b7d7e2',pattern:'glass',tileCm:60},
+  {id:'grass',name:'Rumput',color:'#6e8e4b',pattern:'grass',tileCm:20},
+  {id:'sand',name:'Pasir',color:'#d7c28e',pattern:'sand',tileCm:20},
+  {id:'asphalt',name:'Aspal',color:'#4d5154',pattern:'asphalt',tileCm:20},
+  {id:'metal',name:'Logam',color:'#959da3',pattern:'metal',tileCm:60},
+  {id:'paint',name:'Cat dasar',color:'#d7d9db',pattern:'paint',tileCm:30}
 ];
 const materialById = new Map(materialPresets.map(material=>[material.id,material]));
+const CUSTOM_MATERIALS_KEY='qreasee-custom-materials-v1';
+/** @type {{id: QreaseeMaterial, name: string, color: string, pattern: string, tileCm: number, image: string, custom?: boolean}[]} */
+let customMaterials=[];
+const materialImages=new Map();
+const allMaterials = () => [...materialPresets,...customMaterials];
+const safeScale = value => Math.max(1,Math.min(1000,Number(value)||30));
+
+function storeCustomMaterials() {
+  try {
+    localStorage.setItem(CUSTOM_MATERIALS_KEY,JSON.stringify(customMaterials));
+  } catch { /* Storage can be full or disabled; the material still works this session. */ }
+}
+
+/** @param {any} material @param {boolean=} persist */
+function registerCustomMaterial(material,persist=false) {
+  if (!material || typeof material.id!=='string' || !material.id.startsWith('custom:') ||
+      typeof material.image!=='string' || !material.image.startsWith('data:image/')) return;
+  const safe={id:material.id,name:String(material.name||'Material kustom').slice(0,32),
+    color:/^#[0-9a-f]{6}$/i.test(material.color||'')?material.color:'#b9b9b9',
+    pattern:'image',tileCm:safeScale(material.tileCm),
+    image:material.image,custom:true};
+  materialById.set(safe.id,safe);
+  if (!customMaterials.some(item=>item.id===safe.id)) customMaterials.push(safe);
+  const image=new Image();
+  image.onload=()=>redraw();
+  image.src=safe.image;
+  materialImages.set(safe.id,image);
+  if (persist) storeCustomMaterials();
+}
+
+function loadCustomMaterials() {
+  try {
+    const stored=JSON.parse(localStorage.getItem(CUSTOM_MATERIALS_KEY)||'[]');
+    if (Array.isArray(stored)) {
+      for (const material of stored.slice(0,12)) registerCustomMaterial(material);
+    }
+  } catch { /* Ignore damaged custom material storage. */ }
+}
+loadCustomMaterials();
+
 /** @type {QreaseeMaterial} */
 let bucketMaterial = materialById.has(/** @type {QreaseeMaterial} */ (localStorage.getItem('qreasee-bucket-material')))
   ? /** @type {QreaseeMaterial} */ (localStorage.getItem('qreasee-bucket-material')) : 'paint';
+let bucketScale=safeScale(localStorage.getItem('qreasee-bucket-scale'));
 /** @type {Record<QreaseeView, QreaseePoint2>} */
 const views = { perspective:[.62,.48], iso:[.62,.54], plan:[0,Math.PI/2], front:[0,0], right:[Math.PI/2,0] };
 const clamp = (value,min,max) => Math.max(min,Math.min(max,value));
@@ -1098,25 +1139,119 @@ function renderMaterials() {
     current?materialById.get(current)?.name||'Kustom':'Tanpa material';
   const grid=$('#material-grid');
   grid.replaceChildren();
-  const addOption=(id,name,color,pattern)=>{
+  const addOption=(id,name,color,pattern,image)=>{
     const option=document.createElement('button');
     option.type='button';
     option.className='material-option'+(id?current===id?' active':'':
       current===''?' active':'')+(id?'':' none');
     option.disabled=!canEditModel();
     option.title=name;
+    option.dataset.name=name;
+    option.setAttribute('aria-label',name);
     const swatch=document.createElement('span');swatch.className='material-swatch';
     if (color) swatch.style.setProperty('--swatch',color);
     if (pattern) swatch.dataset.pattern=pattern;
-    const label=document.createElement('span');label.textContent=name;
-    option.append(swatch,label);
+    if (image) {swatch.style.backgroundImage='url("'+image+'")';swatch.style.backgroundSize='cover';}
+    option.append(swatch);
     option.onclick=()=>applyMaterial(id);
     grid.append(option);
   };
   addOption(null,'Tanpa material',null,'');
-  for (const preset of materialPresets)
-    addOption(preset.id,preset.name,preset.color,preset.pattern);
+  for (const material of allMaterials())
+    addOption(material.id,material.name,material.color,material.pattern,material.image);
+  const upload=document.createElement('button');
+  upload.type='button';upload.className='material-option upload';
+  upload.textContent='＋';upload.title='Unggah material dari PC';
+  upload.dataset.name='Unggah material';
+  upload.setAttribute('aria-label','Unggah material dari PC');
+  upload.disabled=!canEditModel();
+  upload.onclick=()=>openMaterialUpload('inspector');
+  grid.append(upload);
+  const scale=targets[0].material_scale||
+    materialById.get(targets[0].material)?.tileCm||30;
+  const scaleInput=$('#material-scale');
+  scaleInput.value=String(scale);
+  scaleInput.disabled=!canEditModel();
 }
+
+function openMaterialUpload(source) {
+  if (!canEditModel()) {showStatus('Akses ini tidak dapat mengubah model.');return;}
+  const input=$('#material-upload');
+  input.dataset.source=source;
+  input.value='';
+  input.click();
+}
+
+/** @param {File} file @param {string=} source */
+async function importMaterialFile(file,source='') {
+  if (!file || !file.type.startsWith('image/')) {
+    showStatus('Pilih berkas gambar untuk material.');return;
+  }
+  if (file.size>8*1024*1024) {showStatus('Ukuran gambar maksimal 8 MB.');return;}
+  const dataUrl=await new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(String(reader.result||''));
+    reader.onerror=()=>reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  const image=await new Promise((resolve,reject)=>{
+    const element=new Image();
+    element.onload=()=>resolve(element);
+    element.onerror=reject;
+    element.src=dataUrl;
+  });
+  const max=384;
+  const ratio=Math.min(1,max/Math.max(image.width,image.height));
+  const canvas=document.createElement('canvas');
+  canvas.width=Math.max(1,Math.round(image.width*ratio));
+  canvas.height=Math.max(1,Math.round(image.height*ratio));
+  const surface=canvas.getContext('2d',{willReadFrequently:true});
+  surface.drawImage(image,0,0,canvas.width,canvas.height);
+  const pixels=surface.getImageData(0,0,canvas.width,canvas.height).data;
+  let red=0,green=0,blue=0;
+  for (let i=0;i<pixels.length;i+=4) {red+=pixels[i];green+=pixels[i+1];blue+=pixels[i+2];}
+  const count=pixels.length/4;
+  const color='#'+[red,green,blue].map(value=>Math.round(value/count).toString(16)
+    .padStart(2,'0')).join('');
+  const name=file.name.replace(/\.[^.]+$/,'').slice(0,32)||'Material kustom';
+  if (customMaterials.length>=12) {showStatus('Maksimal 12 material kustom.');return;}
+  const material={id:/** @type {QreaseeMaterial} */ ('custom:'+identity()),
+    name,color,pattern:'image',tileCm:bucketScale,
+    image:canvas.toDataURL('image/jpeg',.82),custom:true};
+  registerCustomMaterial(material,true);
+  bucketMaterial=material.id;
+  localStorage.setItem('qreasee-bucket-material',bucketMaterial);
+  renderMaterials();
+  renderBucketPalette();
+  showStatus('Material "'+name+'" diunggah. Klik objek untuk menerapkannya.');
+}
+
+$('#material-upload').onchange=event=>{
+  const input=/** @type {HTMLInputElement} */ (event.target);
+  const file=input.files?.[0];
+  const source=input.dataset.source||'';
+  if (file) importMaterialFile(file,source).catch(()=>showStatus('Gambar material gagal dibaca.'));
+};
+$('#material-scale').onchange=async event=>{
+  if (!canEditModel()) return;
+  const targets=materialTargets();
+  if (!targets.length) return;
+  const value=safeScale(/** @type {HTMLInputElement} */ (event.target).value);
+  /** @type {HTMLInputElement} */ (event.target).value=String(value);
+  const after=targets.map(object=>({...object,material_scale:value}));
+  const saved=await batch(targets,after,[...state.selected]);
+  if (saved) {
+    bucketScale=value;
+    localStorage.setItem('qreasee-bucket-scale',String(value));
+    showStatus('Skala pola '+value+' cm.');
+  }
+};
+$('#bucket-scale').onchange=event=>{
+  bucketScale=safeScale(/** @type {HTMLInputElement} */ (event.target).value);
+  /** @type {HTMLInputElement} */ (event.target).value=String(bucketScale);
+  localStorage.setItem('qreasee-bucket-scale',String(bucketScale));
+  showStatus('Skala kuas '+bucketScale+' cm.');
+};
 
 /** @param {QreaseeMaterial|null} id */
 async function applyMaterial(id) {
@@ -1127,11 +1262,14 @@ async function applyMaterial(id) {
   if (id && !preset) return;
   const after=targets.map(object=>({...object,
     material:preset?preset.id:null,
+    material_scale:preset?preset.tileCm:null,
     ...(preset?{color:preset.color}:{})}));
   const saved=await batch(targets,after,[...state.selected]);
   if (saved) {
     bucketMaterial=preset?preset.id:null;
+    if (preset) bucketScale=preset.tileCm;
     localStorage.setItem('qreasee-bucket-material',bucketMaterial||'');
+    localStorage.setItem('qreasee-bucket-scale',String(bucketScale));
     renderBucketPalette();
     showStatus(preset?'Material '+preset.name+' diterapkan.':'Material dihapus.');
   }
@@ -1146,28 +1284,41 @@ function renderBucketPalette() {
   $('#bucket-current').textContent=current?.name||'Tanpa material';
   const grid=$('#bucket-grid');
   grid.replaceChildren();
-  const add=(id,name,color,pattern)=>{
+  const add=(id,name,color,pattern,image,tileCm)=>{
     const option=document.createElement('button');
     option.type='button';
     option.className='bucket-option'+((id?bucketMaterial===id:bucketMaterial===null)?' active':'')+
       (id?'':' none');
     option.title=name;
+    option.dataset.name=name;
+    option.setAttribute('aria-label',name);
     const swatch=document.createElement('span');swatch.className='material-swatch';
     if (color) swatch.style.setProperty('--swatch',color);
     if (pattern) swatch.dataset.pattern=pattern;
-    const label=document.createElement('span');label.textContent=name;
-    option.append(swatch,label);
+    if (image) {swatch.style.backgroundImage='url("'+image+'")';swatch.style.backgroundSize='cover';}
+    option.append(swatch);
     option.onclick=()=>{
       bucketMaterial=id;
+      if (tileCm) bucketScale=tileCm;
       localStorage.setItem('qreasee-bucket-material',id||'');
+      localStorage.setItem('qreasee-bucket-scale',String(bucketScale));
       renderBucketPalette();
       showStatus((name)+' dipilih. Klik objek atau Group untuk menerapkannya.');
     };
     grid.append(option);
   };
-  for (const preset of materialPresets)
-    add(preset.id,preset.name,preset.color,preset.pattern);
+  for (const material of allMaterials())
+    add(material.id,material.name,material.color,material.pattern,material.image,material.tileCm);
   add(null,'Tanpa material',null,'');
+  const upload=document.createElement('button');
+  upload.type='button';upload.className='bucket-option upload';
+  upload.textContent='＋';upload.title='Unggah material dari PC';
+  upload.dataset.name='Unggah material';
+  upload.setAttribute('aria-label','Unggah material dari PC');
+  upload.onclick=()=>openMaterialUpload('bucket');
+  grid.append(upload);
+  const scaleInput=$('#bucket-scale');
+  scaleInput.value=String(bucketScale);
 }
 
 /** @param {string} target @param {QreaseeMaterial|null} id */
@@ -1179,6 +1330,7 @@ async function paintMaterial(target,id) {
   if (id && !preset) return;
   const after=targets.map(object=>({...object,
     material:preset?preset.id:null,
+    material_scale:preset?bucketScale:null,
     ...(preset?{color:preset.color}:{})}));
   const saved=await batch(targets,after,[...state.selected]);
   if (saved) showStatus(preset
@@ -3545,6 +3697,18 @@ function drawMaterialTexture(face) {
   const left=Math.min(...xs),right=Math.max(...xs),top=Math.min(...ys),bottom=Math.max(...ys);
   const width=right-left,height=bottom-top;
   if (width<3||height<3) return;
+  const scaleCm=safeScale(face.object.material_scale||preset.tileCm);
+  let worldLength=0,screenLength=0;
+  const world=face.world&&face.world.length===face.points.length?face.world:[];
+  for (let i=1;i<face.points.length;i++) {
+    screenLength+=Math.hypot(face.points[i][0]-face.points[i-1][0],
+      face.points[i][1]-face.points[i-1][1]);
+    if (world.length) worldLength+=Math.hypot(world[i][0]-world[i-1][0],
+      world[i][1]-world[i-1][1],world[i][2]-world[i-1][2]);
+  }
+  const pixelsPerMeter=worldLength>1e-6?screenLength/worldLength:
+    Math.max(20,camera.scale);
+  const unit=clamp(pixelsPerMeter*scaleCm/100,10,160);
   let seed=2166136261;
   for (const character of face.object.id+preset.pattern) {
     seed^=character.charCodeAt(0);
@@ -3557,76 +3721,92 @@ function drawMaterialTexture(face) {
   ctx.save();
   polygon(face.points);
   ctx.clip();
-  ctx.lineWidth=.7;
-  const horizontalLines=(step,color='#00000024')=>{
+  if (preset.pattern==='image') {
+    const image=materialImages.get(material);
+    if (image&&image.complete&&image.naturalWidth) {
+      const tileW=Math.max(5,unit);
+      const tileH=Math.max(5,unit*image.naturalHeight/image.naturalWidth);
+      for (let y=top;y<bottom;y+=tileH) for (let x=left;x<right;x+=tileW)
+        ctx.drawImage(image,x,y,tileW,tileH);
+      ctx.restore();
+      return;
+    }
+    ctx.restore();
+    return;
+  }
+  ctx.lineWidth=.85;
+  const horizontalLines=(step,color='#00000038')=>{
     ctx.strokeStyle=color;
     for (let y=top+step;y<bottom;y+=step) {
       ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();
     }
   };
-  const verticalLines=(step,color='#00000020',offset=0)=>{
+  const verticalLines=(step,color='#00000030',offset=0)=>{
     ctx.strokeStyle=color;
     for (let x=left+offset;x<right;x+=step) {
       ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,bottom);ctx.stroke();
     }
   };
   if (preset.pattern==='brick') {
-    horizontalLines(9);
-    for (let row=0,y=top;y<bottom;y+=9,row++) {
-      const offset=row%2?0:9;
-      ctx.strokeStyle='#00000020';
-      for (let x=left+offset;x<right;x+=18) {
-        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,Math.min(bottom,y+9));ctx.stroke();
+    const row=unit*.5;
+    horizontalLines(row,'#00000042');
+    for (let index=0,y=top;y<bottom;y+=row,index++) {
+      const offset=index%2?0:unit*.5;
+      ctx.strokeStyle='#00000038';
+      for (let x=left+offset;x<right;x+=unit) {
+        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,Math.min(bottom,y+row));ctx.stroke();
       }
     }
   } else if (preset.pattern==='block') {
-    horizontalLines(13,'#0000001d');
-    for (let row=0,y=top;y<bottom;y+=13,row++) {
-      const offset=row%2?0:10;
-      ctx.strokeStyle='#00000018';
-      for (let x=left+offset;x<right;x+=20) {
-        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,Math.min(bottom,y+13));ctx.stroke();
+    const row=unit*.4;
+    horizontalLines(row,'#00000036');
+    for (let index=0,y=top;y<bottom;y+=row,index++) {
+      const offset=index%2?0:unit*.4;
+      ctx.strokeStyle='#00000030';
+      for (let x=left+offset;x<right;x+=unit*.8) {
+        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,Math.min(bottom,y+row));ctx.stroke();
       }
     }
   } else if (preset.pattern==='timber') {
-    ctx.strokeStyle='#00000024';
-    for (let line=1;line<7;line++) {
-      const base=top+height*line/7;
+    ctx.strokeStyle='#00000038';
+    const spacing=Math.max(8,height/6);
+    for (let line=1,y=top+spacing;y<bottom;y+=spacing,line++) {
       ctx.beginPath();
-      for (let x=left;x<=right;x+=12) {
-        const y=base+Math.sin((x-left)/17+line)*1.4+(random()-.5);
-        if (x===left) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      for (let x=left;x<=right;x+=Math.max(8,unit*.35)) {
+        const wave=base=>base+Math.sin((x-left)/(unit*.45||17)+line)*unit*.12+(random()-.5)*1.2;
+        if (x===left) ctx.moveTo(x,wave(y)); else ctx.lineTo(x,wave(y));
       }
       ctx.stroke();
     }
   } else if (preset.pattern==='zinc'||preset.pattern==='metal') {
-    const step=preset.pattern==='zinc'?9:14;
-    verticalLines(step,'#00000028');
-    verticalLines(step,'#ffffff3d',1);
+    verticalLines(unit,'#00000036');
+    verticalLines(unit,'#ffffff50',1);
   } else if (preset.pattern==='tile') {
-    horizontalLines(9,'#0000002e');
-    for (let row=0,y=top;y<bottom;y+=9,row++) {
-      ctx.strokeStyle='#ffffff2c';
-      for (let x=left+(row%2?0:7);x<right;x+=14) {
-        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,Math.min(bottom,y+9));ctx.stroke();
+    const row=unit*.42,tile=unit*.55;
+    horizontalLines(row,'#00000044');
+    for (let index=0,y=top;y<bottom;y+=row,index++) {
+      ctx.strokeStyle='#ffffff4a';
+      for (let x=left+(index%2?0:tile*.5);x<right;x+=tile) {
+        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,Math.min(bottom,y+row));ctx.stroke();
       }
     }
   } else if (preset.pattern==='glass') {
-    ctx.fillStyle='#ffffff24';ctx.fillRect(left,top,width,height);
-    ctx.strokeStyle='#ffffff45';ctx.lineWidth=2;
-    for (let offset=-height;offset<width;offset+=28) {
+    ctx.fillStyle='#ffffff28';ctx.fillRect(left,top,width,height);
+    ctx.strokeStyle='#ffffff55';ctx.lineWidth=2;
+    const step=Math.max(16,unit*.8);
+    for (let offset=-height;offset<width;offset+=step) {
       ctx.beginPath();ctx.moveTo(left+offset,bottom);ctx.lineTo(left+offset+height,top);ctx.stroke();
     }
   } else if (preset.pattern==='grass'||preset.pattern==='sand'||preset.pattern==='asphalt') {
-    const count=preset.pattern==='grass'?55:75;
+    const count=clamp(Math.round(width*height/(unit*unit)*6),16,110);
     for (let i=0;i<count;i++) {
       const x=left+random()*width,y=top+random()*height;
       if (preset.pattern==='grass') {
-        ctx.strokeStyle=i%3?'#ffffff30':'#00000028';
-        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+(random()-.5)*2,y-2-random()*3);ctx.stroke();
+        ctx.strokeStyle=i%3?'#ffffff42':'#00000038';
+        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+(random()-.5)*3,y-3-random()*4);ctx.stroke();
       } else {
-        ctx.fillStyle=i%3?'#ffffff33':(preset.pattern==='asphalt'?'#0000003a':'#00000020');
-        ctx.beginPath();ctx.arc(x,y,random()*1.4+.4,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle=i%3?'#ffffff45':(preset.pattern==='asphalt'?'#0000004a':'#00000028');
+        ctx.beginPath();ctx.arc(x,y,random()*1.6+.5,0,Math.PI*2);ctx.fill();
       }
     }
   }
@@ -3739,11 +3919,12 @@ function draw() {
       if (face.points.length > 2) {
         const hiddenFace=state.showHidden&&face.object.hidden;
         const grayFace=state.showHidden&&!face.object.hidden;
+        const outsideContext=Boolean(state.inside)&&face.object.container?.id!==state.inside;
         ctx.fillStyle = hiddenFace ? shade('#e8932a',Math.max(.8,face.tone)) :
-          grayFace ? shade('#aeb4ba',face.tone) :
+          grayFace||outsideContext ? shade('#aeb4ba',face.tone) :
           shade(face.object.color,face.section ? .9 : face.tone);
         ctx.fill();
-        if (!state.showHidden) drawMaterialTexture(face);
+        if (!state.showHidden&&!outsideContext) drawMaterialTexture(face);
         if (selected || hovered) {
           ctx.save();
           ctx.fillStyle = selected ? selectionPattern : hoverPattern;
@@ -4538,6 +4719,9 @@ canvas.addEventListener('pointerdown',event=>{
     if (tool==='bucket') {
       const face=pickFace(start,false);
       if (!face) {showStatus('Klik permukaan objek untuk menerapkan material.');return;}
+      if (state.inside && face.object.container?.id!==state.inside) {
+        showStatus('Klik bidang di dalam Group/Component, atau keluar dari Edit isi.');return;
+      }
       paintMaterial(targetId(face.object),bucketMaterial);
       return;
     }
@@ -4974,7 +5158,7 @@ canvas.addEventListener('pointermove',event=>{
 canvas.addEventListener('pointerleave',()=>{if (!state.layout) state.cursor=null;state.hoverKey=null;state.inference=null;redraw();});
 canvas.addEventListener('dblclick',event=>{
   if (state.tool==='line' && state.linePending) { finishLine(); return; }
-  if (state.tool!=='select') return;
+  if (!['select','bucket'].includes(state.tool)) return;
   const face=state.hits.findLast(candidate=>contains(pointer(event),candidate.points));
   if (face?.object.container) enterContainer(face.object.container.id);
 });
