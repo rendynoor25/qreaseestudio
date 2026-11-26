@@ -10,7 +10,7 @@ type QreaseeMaterial = 'brick' | 'hebel' | 'timber' | 'zinc' | 'clay_tile' |
 type QreaseeTool =
   | 'select' | 'line' | 'arc' | 'offset' | 'rectangle' | 'circle'
   | 'pull' | 'move' | 'rotate' | 'scale' | 'erase' | 'measure'
-  | 'section' | 'orbit' | 'pan';
+  | 'section' | 'bucket' | 'orbit' | 'pan';
 
 interface QreaseeMembership {
   id: string;
@@ -37,6 +37,7 @@ interface QreaseeObject {
   rotation: number;
   color: string;
   material?: QreaseeMaterial | null;
+  hidden?: boolean;
   container?: QreaseeMembership | null;
   profile?: QreaseeProfile | null;
   geometry?: {vertices:QreaseePoint[]; faces:[number,number,number][]} | null;
@@ -86,6 +87,7 @@ interface QreaseeSectionPlane {
   origin: QreaseePoint;
   normal: QreaseePoint;
   enabled?: boolean;
+  hidden?: boolean;
 }
 
 interface QreaseeShare {
@@ -215,6 +217,7 @@ interface QreaseeHit {
   smooth: boolean;
   quiet: boolean;
   section?: boolean;
+  hidden?: boolean;
   key: string;
 }
 
@@ -266,6 +269,7 @@ interface QreaseeState {
   cursor: QreaseeCursor | null;
   canManageShare: boolean;
   shareRole: 'edit' | 'comment' | 'view';
+  showHidden: boolean;
 }
 
 interface QreaseeCloudConfig {

@@ -421,3 +421,22 @@ body[data-theme=light] .section-row-actions button:hover{background:#e8edf2}
 body[data-theme=light] .material-option{background:#fff}
 body[data-theme=light] .material-option:hover{border-color:#aeb8c2}
 body[data-theme=light] .material-swatch{border-color:#0000001f}
+
+/* Material bucket */
+.bucket-palette{position:absolute;left:15px;top:57px;z-index:5;width:248px;padding:9px;border:1px solid #b9c2ca;border-radius:9px;background:#fafbfc;color:#29313a;box-shadow:0 10px 28px #15243324}
+.bucket-palette-head{display:flex;align-items:center;gap:7px;margin-bottom:8px}
+.bucket-palette-head>[data-icon]{width:26px;height:26px;border-radius:6px;background:#fbe4ca;color:#a95b19;display:grid;place-items:center}
+.bucket-palette-head>[data-icon] svg{width:16px;height:16px}
+.bucket-palette-head>div{display:flex;flex-direction:column;min-width:0}
+.bucket-palette-head strong{font-size:11px}
+.bucket-palette-head small{font-size:9px;color:#7b8793}
+.bucket-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;max-height:242px;overflow:auto}
+.bucket-option{display:flex;align-items:center;gap:6px;justify-content:flex-start;min-height:32px;padding:3px 5px;border:1px solid #d7dee5;border-radius:6px;background:#fff;color:#29313a;white-space:normal;text-align:left}
+.bucket-option:hover{border-color:#e0a15e}
+.bucket-option.active{border-color:#d27a2b;background:#fff0e4;color:#8f4c12}
+.bucket-option .material-swatch{width:20px;height:20px;border-radius:4px}
+.bucket-option span:last-child{font-size:9px;line-height:1.15;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:760px){.bucket-palette{left:6px;top:54px;width:225px}}
+#viewport[data-tool=bucket]{cursor:copy}
+.section-row.hidden{opacity:.62}.section-row.hidden .section-symbol{background:#7c858e;color:#eef1f3}
+#hidden-toggle.active{color:#e8932a;background:#3a2a18}

@@ -65,6 +65,8 @@ pub struct Object {
     pub color: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<Box<Membership>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -628,6 +630,8 @@ pub struct SectionPlane {
     pub normal: Point,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
 }
 
 fn default_enabled() -> bool {
@@ -1085,6 +1089,7 @@ pub fn demo() -> Document {
             rotation: 0.0,
             color: color.into(),
             material: None,
+            hidden: false,
             container: None,
             profile: None,
             geometry: None,
@@ -1534,6 +1539,7 @@ mod tests {
             origin: [1.0, 2.0, 3.0],
             normal: [0.0, 0.0, 1.0],
             enabled: true,
+            hidden: false,
         };
         apply(
             &mut doc,

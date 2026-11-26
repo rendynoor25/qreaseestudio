@@ -82,6 +82,7 @@
       <button id="browser-toggle" class="rail-toggle" title="Struktur model" aria-label="Struktur model" aria-expanded="false" aria-controls="object-panel" data-icon="layers"></button>
       <div id="tool-buttons"></div>
       <button class="rail-toggle rail-bottom" id="sections-toggle" title="Bidang potong" aria-label="Bidang potong" aria-expanded="false" aria-controls="sections-panel" data-icon="section"></button>
+      <button class="rail-toggle rail-bottom" id="hidden-toggle" title="Geometri tersembunyi (Shift+H)" aria-label="Tampilkan geometri tersembunyi" aria-pressed="false" data-icon="hidden"></button>
       <button class="rail-toggle rail-bottom" id="fit" title="Paskan model ke layar (Shift+F)" aria-label="Paskan model" data-icon="fit"></button>
       <button class="rail-toggle rail-bottom" id="print" title="Cetak / PDF" aria-label="Cetak / PDF" data-icon="download" hidden></button>
       <div id="rail-resize" class="resize-handle rail-resize" role="separator" tabindex="0" aria-label="Ubah lebar bilah alat" aria-orientation="vertical" aria-valuemin="52" aria-valuemax="140" aria-valuenow="52" title="Tarik untuk mengubah lebar bilah alat"></div>
@@ -100,6 +101,10 @@
     </aside>
     <section class="stage" id="model-stage" aria-label="Kanvas model">
       <canvas id="viewport" tabindex="0" aria-label="Kanvas model 3D"></canvas>
+      <div id="bucket-palette" class="bucket-palette" hidden>
+        <div class="bucket-palette-head"><span data-icon="bucket" aria-hidden="true"></span><div><strong>Material</strong><small id="bucket-current">Cat dasar</small></div></div>
+        <div id="bucket-grid" class="bucket-grid"></div>
+      </div>
       <div id="comment-composer" class="comment-composer" role="dialog" aria-label="Tulis komentar" hidden>
         <div class="comment-composer-head">
           <span data-icon="comment" aria-hidden="true"></span>
@@ -226,7 +231,7 @@
     </aside>
     <aside class="sidebar sections-panel" id="sections-panel" aria-label="Bidang potong" hidden>
       <div class="pane-heading"><h2>Bidang potong</h2><button id="sections-close" aria-label="Tutup bidang potong" data-icon="close"></button></div>
-      <p class="comments-hint">Potongan hanya mengubah tampilan. Geser bidang sepanjang normal atau balik arahnya.</p>
+      <p class="comments-hint">Potongan hanya berlaku di viewport Model; view Layout tidak terpotong. Klik tepi bidang untuk menggeser, atau klik kanan untuk menggeser/menghapus.</p>
       <div class="section-panel-actions"><button id="section-add" class="primary-outlined">＋ Bidang baru</button></div>
       <div id="section-list" class="section-list"></div>
     </aside>
@@ -235,6 +240,11 @@
   <div id="object-menu" class="object-menu" role="menu" hidden>
     <div class="object-menu-title" id="object-menu-title"></div>
     <button id="object-menu-comment" role="menuitem"><span data-icon="comment"></span> Komentar</button>
+    <button id="object-menu-section-move" role="menuitem" hidden>Geser bidang</button>
+    <button id="object-menu-section-flip" role="menuitem" hidden>Balik arah</button>
+    <button id="object-menu-section-hide" role="menuitem" hidden>Sembunyikan bidang</button>
+    <button id="object-menu-section-delete" role="menuitem" class="danger" hidden>Hapus bidang</button>
+    <button id="object-menu-hide" role="menuitem" hidden>Sembunyikan objek</button>
   </div>
   <dialog id="share-dialog" class="share-dialog">
     <form method="dialog" class="dialog-head"><h2>Bagikan proyek</h2><button aria-label="Tutup" data-icon="close"></button></form>
