@@ -41,6 +41,8 @@ const icons = {
   measure:'<path d="M3 17 17 3l4 4L7 21zM9 11l2 2m1-5 2 2m1-5 2 2"/>',
   comment:'<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8m-8 4h5"/>',
   section:'<path d="M3 5h18v14H3z"/><path d="m4 17 16-10" stroke-dasharray="3 2"/>',
+  bucket:'<path d="m5 13 7-7 6 6-7 7a2 2 0 0 1-3 0l-3-3a2 2 0 0 1 0-3z"/><path d="m9 9 6 6"/><path d="M19 15.5c1.2 1.5 1.2 2.7 0 3.5-1.2-.8-1.2-2 0-3.5z"/>',
+  hidden:'<path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/><path d="m4 4 16 16"/>',
   orbit:'<ellipse cx="12" cy="12" rx="9" ry="5.5" transform="rotate(-28 12 12)"/><path d="M8 4a8 8 0 0 1 12 5m-2-4 2 4 2-4M10 20a8 8 0 0 1-6-5"/>',
   pan:'<path d="M8 13V6a1.5 1.5 0 0 1 3 0v5-7a1.5 1.5 0 0 1 3 0v7-5a1.5 1.5 0 0 1 3 0v6-3a1.5 1.5 0 0 1 3 0v6c0 4-2 6-6 6h-2a5 5 0 0 1-4-2l-4-5a1.6 1.6 0 0 1 2.5-2z"/>',
   download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/>'
@@ -67,8 +69,9 @@ const tools = {
   erase: ['Penghapus', 'E', 'Klik objek untuk menghapus; Ctrl+Z untuk mengurungkan'],
   measure: ['Ukur', 'T', 'Klik titik awal, lalu gerakkan kursor untuk membaca jarak sampai titik akhir'],
   section: ['Bidang potong', 'X', 'Klik bidang untuk menempatkan potongan; geser sepanjang normal lalu klik lagi'],
+  bucket: ['Material', 'B', 'Pilih material pada palet, lalu klik objek atau Group untuk menerapkannya'],
   orbit: ['Orbit', 'O', 'Tarik untuk memutar kamera'],
-  pan: ['Geser kamera', 'H', 'Tarik untuk menggeser kamera']
+  pan: ['Geser kamera', '', 'Tarik untuk menggeser kamera']
 };
 
 const identity = () => {
@@ -88,7 +91,7 @@ const state = {
   doc: null, meshes: [], plans: [], selected: new Set(), inside: null, tool: 'select', layout: false, busy: false,
   snapping: true, inference: null,
   undo: [], redo: [], drag: null, arcPending:null, linePending:null, linePress:null, drawPending:null,
-  movePending:null, rotatePending:null, offsetPending:null, measurePending:null, sectionPending:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null, canManageShare:true, shareRole:'edit'
+  movePending:null, rotatePending:null, offsetPending:null, measurePending:null, sectionPending:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null, canManageShare:true, shareRole:'edit', showHidden:false
 };
 const canvas = $('#viewport');
 const ctx = canvas.getContext('2d');
@@ -137,6 +140,9 @@ const materialPresets = [
   {id:'paint',name:'Cat dasar',color:'#d7d9db',pattern:'paint'}
 ];
 const materialById = new Map(materialPresets.map(material=>[material.id,material]));
+/** @type {QreaseeMaterial} */
+let bucketMaterial = materialById.has(/** @type {QreaseeMaterial} */ (localStorage.getItem('qreasee-bucket-material')))
+  ? /** @type {QreaseeMaterial} */ (localStorage.getItem('qreasee-bucket-material')) : 'paint';
 /** @type {Record<QreaseeView, QreaseePoint2>} */
 const views = { perspective:[.62,.48], iso:[.62,.54], plan:[0,Math.PI/2], front:[0,0], right:[Math.PI/2,0] };
 const clamp = (value,min,max) => Math.max(min,Math.min(max,value));
@@ -205,6 +211,7 @@ function setTool(tool) {
   }
   state.tool = tool;
   canvas.style.cursor='';
+  renderBucketPalette();
   if (tool==='erase') {
     state.selected.clear();
     state.hoverKey=null;
@@ -639,15 +646,15 @@ async function openRoom(createBlank) {
       .replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,32) || 'Tamu';
   }
   state.busy = false;
+  exitLayoutView();
+  layoutSelected = null;
+  $('#layout-selection').hidden = true;
   state.room = '';
   state.doc = null;
   state.meshes = [];
   state.plans = [];
   state.selected.clear();
   state.inside = null;
-  exitLayoutView();
-  layoutSelected = null;
-  $('#layout-selection').hidden = true;
   state.inference = null;
   state.arcPending = null;
   state.linePending = null;
@@ -981,6 +988,7 @@ function refresh(force = false) {
     });
   } else objectBaseline = null;
   renderMaterials();
+  renderBucketPalette();
   const sheetForm = $('#sheet-form');
   if (doc && (force || sheetForm.dataset.dirty !== 'yes')) {
     for (const key of ['room_title','drawn_by','checked_by','issue_date']) sheetForm.elements.namedItem(key).value=doc.sheet[key] || '';
@@ -1121,13 +1129,102 @@ async function applyMaterial(id) {
     material:preset?preset.id:null,
     ...(preset?{color:preset.color}:{})}));
   const saved=await batch(targets,after,[...state.selected]);
-  if (saved) showStatus(preset?'Material '+preset.name+' diterapkan.':'Material dihapus.');
+  if (saved) {
+    bucketMaterial=preset?preset.id:null;
+    localStorage.setItem('qreasee-bucket-material',bucketMaterial||'');
+    renderBucketPalette();
+    showStatus(preset?'Material '+preset.name+' diterapkan.':'Material dihapus.');
+  }
+}
+
+function renderBucketPalette() {
+  const palette=$('#bucket-palette');
+  const visible=state.tool==='bucket'&&canEditModel()&&!state.layout&&Boolean(state.doc);
+  palette.hidden=!visible;
+  if (!visible) return;
+  const current=materialById.get(bucketMaterial);
+  $('#bucket-current').textContent=current?.name||'Tanpa material';
+  const grid=$('#bucket-grid');
+  grid.replaceChildren();
+  const add=(id,name,color,pattern)=>{
+    const option=document.createElement('button');
+    option.type='button';
+    option.className='bucket-option'+((id?bucketMaterial===id:bucketMaterial===null)?' active':'')+
+      (id?'':' none');
+    option.title=name;
+    const swatch=document.createElement('span');swatch.className='material-swatch';
+    if (color) swatch.style.setProperty('--swatch',color);
+    if (pattern) swatch.dataset.pattern=pattern;
+    const label=document.createElement('span');label.textContent=name;
+    option.append(swatch,label);
+    option.onclick=()=>{
+      bucketMaterial=id;
+      localStorage.setItem('qreasee-bucket-material',id||'');
+      renderBucketPalette();
+      showStatus((name)+' dipilih. Klik objek atau Group untuk menerapkannya.');
+    };
+    grid.append(option);
+  };
+  for (const preset of materialPresets)
+    add(preset.id,preset.name,preset.color,preset.pattern);
+  add(null,'Tanpa material',null,'');
+}
+
+/** @param {string} target @param {QreaseeMaterial|null} id */
+async function paintMaterial(target,id) {
+  if (!canEditModel()) {showStatus('Akses ini tidak dapat mengubah model.');return;}
+  const targets=commentTargetObjects(target).filter(object=>object.shape!=='line');
+  if (!targets.length) {showStatus('Tidak ada permukaan untuk dicat.');return;}
+  const preset=id?materialById.get(id):null;
+  if (id && !preset) return;
+  const after=targets.map(object=>({...object,
+    material:preset?preset.id:null,
+    ...(preset?{color:preset.color}:{})}));
+  const saved=await batch(targets,after,[...state.selected]);
+  if (saved) showStatus(preset
+    ? 'Material '+preset.name+' diterapkan ke '+commentTargetName(target)+'.'
+    : 'Material dihapus dari '+commentTargetName(target)+'.');
 }
 
 const sectionPlanes = () => state.doc?.sections || [];
-const activeSections = () => sectionPlanes().filter(section=>section.enabled!==false);
+const activeSections = () => {
+  const sections=sectionPlanes().filter(section=>section.enabled!==false&&!section.hidden);
+  const preview=state.sectionPending;
+  if (preview?.existing) {
+    return sections.map(section=>section.id===preview.existing.id
+      ? {...section,origin:preview.origin}:section);
+  }
+  if (preview) {
+    return [...sections,{id:'__preview__',name:'Pratinjau',symbol:'§',
+      origin:preview.origin,normal:preview.normal,enabled:true,hidden:false}];
+  }
+  if (sectionDragPreview) {
+    return sections.map(section=>section.id===sectionDragPreview.section.id
+      ? {...section,origin:sectionDragPreview.origin}:section);
+  }
+  return sections;
+};
+function setHiddenMode(open) {
+  state.showHidden=open;
+  const button=$('#hidden-toggle');
+  button.setAttribute('aria-pressed',String(open));
+  button.classList.toggle('active',open);
+  if (!open) {
+    const visible=new Set(objects().filter(object=>!object.hidden).map(targetId));
+    state.selected=new Set([...state.selected].filter(id=>visible.has(id)));
+  }
+  renderSections();
+  showStatus(open?'Mode geometri tersembunyi aktif. Objek tersembunyi disorot oranye.':
+    'Mode geometri tersembunyi nonaktif.');
+  redraw();
+}
+
 /** @type {string|null} */
 let activeSectionId = null;
+/** @type {{section:QreaseeSectionPlane,origin:QreaseePoint}|null} */
+let sectionDragPreview = null;
+/** @type {{id:string,quad:number[][],section:QreaseeSectionPlane}[]} */
+let sectionQuads = [];
 
 /** @param {QreaseePoint} value @returns {QreaseePoint} */
 function normalizePoint(value) {
@@ -1256,8 +1353,9 @@ function renderSections() {
   const editable=canEditModel();
   for (const section of sections) {
     const enabled=section.enabled!==false;
+    const hidden=Boolean(section.hidden);
     const row=document.createElement('div');
-    row.className='section-row'+(enabled?' enabled':'')+
+    row.className='section-row'+(enabled?' enabled':'')+(hidden?' hidden':'')+
       (activeSectionId===section.id?' active':'');
     row.onclick=()=>{activeSectionId=section.id;renderSections();redraw();};
     const head=document.createElement('div');head.className='section-row-head';
@@ -1269,7 +1367,7 @@ function renderSections() {
     detail.textContent='Normal '+section.normal.map(value=>round(value)).join(', ');
     name.append(title,detail);
     const state=document.createElement('span');state.className='section-state';
-    state.textContent=enabled?'Aktif':'Nonaktif';
+    state.textContent=hidden?'Tersembunyi':enabled?'Aktif':'Nonaktif';
     head.append(symbol,name,state);
     const actions=document.createElement('div');actions.className='section-row-actions';
     const move=document.createElement('button');move.type='button';move.textContent='Geser';
@@ -1283,10 +1381,14 @@ function renderSections() {
     toggle.textContent=enabled?'Nonaktifkan':'Aktifkan';
     toggle.disabled=!editable;
     toggle.onclick=event=>{event.stopPropagation();updateSection(section,{enabled:!enabled});};
+    const hide=document.createElement('button');hide.type='button';
+    hide.textContent=hidden?'Tampilkan':'Sembunyikan';
+    hide.disabled=!editable;
+    hide.onclick=event=>{event.stopPropagation();updateSection(section,{hidden:!hidden});};
     const remove=document.createElement('button');remove.type='button';remove.className='danger';
     remove.textContent='Hapus';remove.disabled=!editable;
     remove.onclick=event=>{event.stopPropagation();removeSection(section);};
-    actions.append(move,flip,toggle,remove);
+    actions.append(move,flip,toggle,hide,remove);
     row.append(head,actions);
     list.append(row);
   }
@@ -1379,11 +1481,9 @@ function placeSectionAt(start) {
 }
 
 function drawSectionPlanes() {
-  const preview=state.sectionPending
-    ? {id:'preview',name:'Pratinjau',symbol:'§',origin:state.sectionPending.origin,
-      normal:state.sectionPending.normal,enabled:true}
-    : null;
-  const list=[...activeSections(),...(preview?[preview]:[])];
+  const list=[...activeSections(),
+    ...(state.showHidden?sectionPlanes().filter(section=>section.hidden):[])];
+  sectionQuads=[];
   if (!list.length) return;
   ctx.save();
   ctx.setLineDash([7,5]);
@@ -1391,7 +1491,8 @@ function drawSectionPlanes() {
   for (const section of list) {
     const quad=sectionQuad(section).map(stagePoint);
     if (quad.some(point=>!Number.isFinite(point[0]))) continue;
-    ctx.strokeStyle=section.id==='preview'?'#e8a24d':
+    ctx.strokeStyle=section.id==='__preview__'?'#e8a24d':
+      section.hidden?'#e8932a':
       activeSectionId===section.id?'#e27f22':'#c98a42';
     polygon(quad);
     ctx.stroke();
@@ -1401,9 +1502,47 @@ function drawSectionPlanes() {
       ctx.fillStyle='#fffaf2';ctx.fill();
       ctx.strokeStyle='#d6842a';ctx.lineWidth=1.7;ctx.stroke();
     }
+    const center=quad.reduce((sum,point)=>[sum[0]+point[0]/quad.length,
+      sum[1]+point[1]/quad.length],[0,0]);
+    const tip=stagePoint([section.origin[0]-normalizePoint(section.normal)[0]*1.5,
+      section.origin[1]-normalizePoint(section.normal)[1]*1.5,
+      section.origin[2]-normalizePoint(section.normal)[2]*1.5]);
+    let direction=[tip[0]-center[0],tip[1]-center[1]];
+    const length=Math.hypot(...direction);
+    if (length<4) direction=[0,1]; else direction=direction.map(value=>value/length);
+    const drawArrow=(x,y,alpha)=>{
+      const end=[x+direction[0]*31,y+direction[1]*31];
+      ctx.save();ctx.globalAlpha=alpha;ctx.strokeStyle='#e8932a';ctx.fillStyle='#e8932a';
+      ctx.lineWidth=2;ctx.lineCap='round';
+      ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(end[0],end[1]);ctx.stroke();
+      const side=[-direction[1],direction[0]];
+      ctx.beginPath();
+      ctx.moveTo(end[0]+direction[0]*7,end[1]+direction[1]*7);
+      ctx.lineTo(end[0]+side[0]*4.5,end[1]+side[1]*4.5);
+      ctx.lineTo(end[0]-side[0]*4.5,end[1]-side[1]*4.5);
+      ctx.closePath();ctx.fill();
+      ctx.restore();
+    };
+    if (section.id!=='__preview__') {
+      const alpha=activeSectionId===section.id?1:.62;
+      for (const point of quad) drawArrow(point[0]+direction[0]*7,point[1]+direction[1]*7,alpha);
+      sectionQuads.push({id:section.id,quad:quad.map(point=>[point[0],point[1]]),section});
+    } else drawArrow(center[0]+direction[0]*8,center[1]+direction[1]*8,.9);
     ctx.setLineDash([7,5]);
   }
   ctx.restore();
+}
+
+/** @param {QreaseePoint2} point @returns {QreaseeSectionPlane|null} */
+function sectionPlaneAt(point) {
+  for (const entry of sectionQuads) {
+    const {quad}=entry;
+    for (const corner of quad) {
+      if (Math.hypot(point[0]-corner[0],point[1]-corner[1])<=38) return entry.section;
+    }
+    if (pointToPolygonEdge(point,quad)<=9) return entry.section;
+  }
+  return null;
 }
 
 /** @param {number[][]} segments @returns {QreaseePoint[][]} */
@@ -1442,13 +1581,12 @@ function chainSectionSegments(segments) {
   return loops;
 }
 
-/** @param {QreaseeMesh[]} meshes @param {QreaseeObject[]} objects @param {(point: QreaseePoint)=>number[]} projection */
-function sectionCaps(meshes,objects,projection) {
-  const sections=activeSections();
+/** @param {QreaseeMesh[]} meshes @param {QreaseeObject[]} objects @param {(point: QreaseePoint)=>number[]} projection @param {QreaseeSectionPlane[]} sections */
+function sectionCaps(meshes,objects,projection,sections) {
   if (!sections.length) return [];
   const groups=new Map();
   objects.forEach((object,index)=>{
-    if (object.shape==='line') return;
+    if (object.shape==='line' || (object.hidden && !state.showHidden)) return;
     const mesh=meshes[index];
     if (!mesh?.faces?.length) return;
     const id=object.solid_id||object.id;
@@ -1523,6 +1661,10 @@ const commentDraftMentions = new Set();
 /** @type {string|null} */
 let objectMenuTarget = null;
 let objectMenuPoint = null;
+/** @type {QreaseeSectionPlane|null} */
+let objectMenuSection = null;
+const SECTION_MENU_IDS=['object-menu-section-move','object-menu-section-flip',
+  'object-menu-section-hide','object-menu-section-delete'];
 
 const commentInitials = name => (name || 'Tamu').split(/\s+/).slice(0,2)
   .map(word => [...word][0] || '').join('').toUpperCase();
@@ -1852,16 +1994,8 @@ async function toggleCommentResolved(comment) {
   if (saved) showStatus(resolved?'Komentar ditandai selesai.':'Komentar dibuka lagi.');
 }
 
-/** @param {string} target @param {number} clientX @param {number} clientY */
-function showObjectMenu(target,clientX,clientY) {
-  objectMenuTarget=target;
-  objectMenuPoint={x:clientX,y:clientY};
-  const group=members(target);
-  const kind=group.length?(group[0].container?.definition?'Component':'Group'):'Objek';
-  $('#object-menu-title').textContent=kind+' · '+commentTargetName(target);
-  const commentButton=$('#object-menu-comment');
-  commentButton.disabled=!canComment();
-  commentButton.title=canComment()?'Tambah komentar':'Akses ini hanya dapat melihat proyek.';
+/** @param {number} clientX @param {number} clientY */
+function placeObjectMenu(clientX,clientY) {
   const menu=$('#object-menu');
   menu.hidden=false;
   const box=menu.getBoundingClientRect();
@@ -1869,10 +2003,54 @@ function showObjectMenu(target,clientX,clientY) {
   menu.style.top=clamp(clientY,8,window.innerHeight-box.height-8)+'px';
 }
 
-function hideObjectMenu() {
-  $('#object-menu').hidden=true;
+function showObjectMenu(target,clientX,clientY) {
+  objectMenuTarget=target;
+  objectMenuPoint={x:clientX,y:clientY};
+  objectMenuSection=null;
+  const group=members(target);
+  const kind=group.length?(group[0].container?.definition?'Component':'Group'):'Objek';
+  $('#object-menu-title').textContent=kind+' · '+commentTargetName(target);
+  const commentButton=$('#object-menu-comment');
+  commentButton.hidden=false;
+  commentButton.disabled=!canComment();
+  commentButton.title=canComment()?'Tambah komentar':'Akses ini hanya dapat melihat proyek.';
+  for (const id of SECTION_MENU_IDS) $('#'+id).hidden=true;
+  const hideButton=$('#object-menu-hide');
+  const allHidden=commentTargetObjects(target).filter(object=>object.shape!=='line')
+    .every(object=>object.hidden);
+  hideButton.hidden=false;
+  hideButton.textContent=allHidden?'Tampilkan objek':'Sembunyikan objek';
+  hideButton.disabled=!canEditModel();
+  placeObjectMenu(clientX,clientY);
+}
+
+function showSectionMenu(section,clientX,clientY) {
   objectMenuTarget=null;
   objectMenuPoint=null;
+  objectMenuSection=section;
+  activeSectionId=section.id;
+  $('#object-menu-title').textContent='Bidang potong '+(section.symbol||'');
+  $('#object-menu-comment').hidden=true;
+  $('#object-menu-hide').hidden=true;
+  for (const id of SECTION_MENU_IDS) {
+    const button=$('#'+id);
+    button.hidden=false;
+    button.disabled=!canEditModel();
+  }
+  $('#object-menu-section-hide').textContent=section.hidden?'Tampilkan bidang':'Sembunyikan bidang';
+  renderSections();
+  placeObjectMenu(clientX,clientY);
+  redraw();
+}
+
+function hideObjectMenu() {
+  $('#object-menu').hidden=true;
+  $('#object-menu-comment').hidden=false;
+  for (const id of SECTION_MENU_IDS) $('#'+id).hidden=true;
+  $('#object-menu-hide').hidden=true;
+  objectMenuTarget=null;
+  objectMenuPoint=null;
+  objectMenuSection=null;
 }
 
 /** @param {string} target */
@@ -1941,6 +2119,7 @@ $('#comments-toggle').onclick=()=>toggleComments($('#comments-panel').hidden);
 $('#comments-close').onclick=()=>toggleComments(false);
 $('#sections-toggle').onclick=()=>toggleSections($('#sections-panel').hidden);
 $('#sections-close').onclick=()=>toggleSections(false);
+$('#hidden-toggle').onclick=()=>setHiddenMode(!state.showHidden);
 $('#section-add').onclick=()=>{
   setTool('section');
   toggleSections(false);
@@ -1960,6 +2139,32 @@ $('#object-menu-comment').onclick=()=>{
   const point=objectMenuPoint;
   hideObjectMenu();
   if (target) openCommentComposer(target,point?.x,point?.y);
+};
+$('#object-menu-section-move').onclick=()=>{
+  const section=objectMenuSection;
+  hideObjectMenu();
+  if (section) beginSectionMove(section);
+};
+$('#object-menu-section-flip').onclick=()=>{
+  const section=objectMenuSection;
+  hideObjectMenu();
+  if (section) updateSection(section,
+    {normal:[-section.normal[0],-section.normal[1],-section.normal[2]]});
+};
+$('#object-menu-section-hide').onclick=()=>{
+  const section=objectMenuSection;
+  hideObjectMenu();
+  if (section) updateSection(section,{hidden:!section.hidden});
+};
+$('#object-menu-hide').onclick=()=>{
+  const target=objectMenuTarget;
+  hideObjectMenu();
+  if (target) toggleHideTarget(target);
+};
+$('#object-menu-section-delete').onclick=()=>{
+  const section=objectMenuSection;
+  hideObjectMenu();
+  if (section) removeSection(section);
 };
 window.addEventListener('pointerdown',event=>{
   if (!$('#object-menu').hidden && !$('#object-menu').contains(/** @type {Node} */ (event.target)))
@@ -2027,6 +2232,7 @@ function renderTree() {
 }
 
 function select(id, additive=false) {
+  activeSectionId=null;
   if (state.movePending) {state.movePending=null;state.inference=null;}
   if (state.rotatePending) {state.rotatePending=null;state.inference=null;}
   if (state.offsetPending) {state.offsetPending=null;state.inference=null;}
@@ -2098,6 +2304,34 @@ function deletionTargets() {
     }
   }
   return [...targets.values()];
+}
+
+/** @param {string} target */
+async function toggleHideTarget(target) {
+  if (!canEditModel()) {showStatus('Akses ini tidak dapat mengubah model.');return;}
+  const targets=commentTargetObjects(target).filter(object=>object.shape!=='line');
+  if (!targets.length) return;
+  const allHidden=targets.every(object=>object.hidden);
+  const after=targets.map(object=>({...object,hidden:!allHidden}));
+  const selection=!allHidden&&!state.showHidden?[]:[...state.selected];
+  const saved=await batch(targets,after,selection);
+  if (saved) showStatus(allHidden?'Objek ditampilkan kembali.':'Objek disembunyikan.');
+}
+
+function toggleHideSelection() {
+  if (activeSectionId) {
+    const section=sectionPlanes().find(item=>item.id===activeSectionId);
+    if (section) {updateSection(section,{hidden:!section.hidden});return;}
+  }
+  if (!canEditModel()) {showStatus('Akses ini tidak dapat mengubah model.');return;}
+  const targets=moveSources().filter(object=>object.shape!=='line');
+  if (!targets.length) {showStatus('Pilih objek atau Group yang akan disembunyikan.');return;}
+  const allHidden=targets.every(object=>object.hidden);
+  const after=targets.map(object=>({...object,hidden:!allHidden}));
+  const selection=!allHidden&&!state.showHidden?[]:[...state.selected];
+  batch(targets,after,selection).then(saved=>{
+    if (saved) showStatus(allHidden?'Objek ditampilkan kembali.':'Objek disembunyikan.');
+  });
 }
 
 function removeObject() {
@@ -2934,6 +3168,59 @@ $('#export-obj').onclick = () => {
   });
   download('.obj','text/plain;charset=utf-8',output.join('\n')+'\n');
 };
+$('#export-dwg').onclick = async () => {
+  if (!state.doc) return;
+  const button = $('#export-dwg');
+  button.disabled = true;
+  try {
+    const {exportDwg} = await import('./cad-export.js');
+    const bytes = exportDwg(state.meshes);
+    download('.dwg','application/acad',bytes);
+    showStatus('Model DWG berhasil diunduh.');
+  } catch (error) {
+    showStatus('Ekspor DWG gagal: ' + (error instanceof Error ? error.message : String(error)));
+  } finally {
+    button.disabled = false;
+  }
+};
+$('#export-layout-dwg').onclick = async () => {
+  if (!state.doc) return;
+  const button = $('#export-layout-dwg');
+  button.disabled = true;
+  try {
+    drawSheet();
+    const {exportLayoutDwg} = await import('./cad-export.js');
+    const bytes = exportLayoutDwg($('#sheet'));
+    download('-layout.dwg','application/acad',bytes);
+    showStatus('Lembar Layout DWG berhasil diunduh.');
+  } catch (error) {
+    showStatus('Ekspor Layout DWG gagal: ' + (error instanceof Error ? error.message : String(error)));
+  } finally {
+    button.disabled = false;
+  }
+};
+$('#import-skp').onclick = () => $('#skp-file').click();
+$('#skp-file').onchange = async event => {
+  const input = /** @type {HTMLInputElement} */ (event.target);
+  const file = input.files?.[0];
+  input.value = '';
+  $('#file-menu').open = false;
+  if (!file || !state.doc) return;
+  const button = $('#import-skp');
+  button.disabled = true;
+  try {
+    const {importSkp} = await import('./skp-import.js');
+    const imported = importSkp(await file.arrayBuffer(), file.name);
+    if (state.doc.objects.length + imported.length > 250) throw new Error('Ruang model melebihi batas 250 objek.');
+    if (JSON.stringify({type:'batch',before:[],after:imported}).length > 200_000) throw new Error('Impor terlalu besar untuk satu perubahan kolaborasi.');
+    const saved = await batch([], imported, [imported[0].container.id]);
+    if (saved) showStatus(`${imported.length} bagian SketchUp berhasil diimpor.`);
+  } catch (error) {
+    showStatus('Impor SKP gagal: ' + (error instanceof Error ? error.message : String(error)));
+  } finally {
+    button.disabled = false;
+  }
+};
 
 
 /** @param {number} yaw @param {number} pitch @returns {(point: QreaseePoint) => QreaseePoint} */
@@ -3097,59 +3384,6 @@ function strokeLine(a,b,color,width=1) {
   ctx.stroke();
 }
 
-$('#export-dwg').onclick = async () => {
-  if (!state.doc) return;
-  const button = $('#export-dwg');
-  button.disabled = true;
-  try {
-    const {exportDwg} = await import('./cad-export.js');
-    const bytes = exportDwg(state.meshes);
-    download('.dwg','application/acad',bytes);
-    showStatus('Model DWG berhasil diunduh.');
-  } catch (error) {
-    showStatus('Ekspor DWG gagal: ' + (error instanceof Error ? error.message : String(error)));
-  } finally {
-    button.disabled = false;
-  }
-};
-$('#export-layout-dwg').onclick = async () => {
-  if (!state.doc) return;
-  const button = $('#export-layout-dwg');
-  button.disabled = true;
-  try {
-    drawSheet();
-    const {exportLayoutDwg} = await import('./cad-export.js');
-    const bytes = exportLayoutDwg($('#sheet'));
-    download('-layout.dwg','application/acad',bytes);
-    showStatus('Lembar Layout DWG berhasil diunduh.');
-  } catch (error) {
-    showStatus('Ekspor Layout DWG gagal: ' + (error instanceof Error ? error.message : String(error)));
-  } finally {
-    button.disabled = false;
-  }
-};
-$('#import-skp').onclick = () => $('#skp-file').click();
-$('#skp-file').onchange = async event => {
-  const input = /** @type {HTMLInputElement} */ (event.target);
-  const file = input.files?.[0];
-  input.value = '';
-  $('#file-menu').open = false;
-  if (!file || !state.doc) return;
-  const button = $('#import-skp');
-  button.disabled = true;
-  try {
-    const {importSkp} = await import('./skp-import.js');
-    const imported = importSkp(await file.arrayBuffer(), file.name);
-    if (state.doc.objects.length + imported.length > 250) throw new Error('Ruang model melebihi batas 250 objek.');
-    if (JSON.stringify({type:'batch',before:[],after:imported}).length > 200_000) throw new Error('Impor terlalu besar untuk satu perubahan kolaborasi.');
-    const saved = await batch([], imported, [imported[0].container.id]);
-    if (saved) showStatus(`${imported.length} bagian SketchUp berhasil diimpor.`);
-  } catch (error) {
-    showStatus('Impor SKP gagal: ' + (error instanceof Error ? error.message : String(error)));
-  } finally {
-    button.disabled = false;
-  }
-};
 function clipNear(world) {
   const [,,depth]=cameraAxes();
   const near=nearPlane;
@@ -3176,12 +3410,13 @@ function clipNear(world) {
 
 function scene(meshes, objects, projection) {
   const faces = [];
-  const sections=activeSections();
+  const sections=projection===stagePoint?activeSections():[];
   const clip=projection===stagePoint && camera.perspective;
   meshes.forEach((mesh,index) => {
     if (!mesh.vertices.length) return;
-    const projected = mesh.vertices.map(projection);
     const object = objects[index];
+    if (object.hidden && !state.showHidden) return;
+    const projected = mesh.vertices.map(projection);
     const smooth = object.surface_role==='side' && object.shape==='circle';
     const quiet = Boolean(object.hide_edges) || Boolean(object.opening_id) && object.surface_role==='side';
     const entries = mesh.faces.length ? mesh.faces : [[0,1]];
@@ -3220,11 +3455,12 @@ function scene(meshes, objects, projection) {
         return delta===1 || delta===ring-1;
       }) : null;
       faces.push({object,points,edges,world:visible,top,tone,cut:mesh.cut,
+        hidden:Boolean(object.hidden),
         depth:points.reduce((sum,p) => sum+p[2],0)/points.length,
         smooth,quiet,key:object.id+':'+index+':'+entryIndex});
     }
   });
-  faces.push(...sectionCaps(meshes,objects,projection));
+  if (sections.length) faces.push(...sectionCaps(meshes,objects,projection,sections));
   return orderFaces(faces);
 }
 
@@ -3487,7 +3723,8 @@ function draw() {
     }
     const sceneKey=updates?null:JSON.stringify([width,height,camera.yaw,camera.pitch,
       camera.axes,camera.center,camera.x,camera.y,camera.scale,camera.distance,camera.perspective,
-      state.doc.sections||[]]);
+      state.doc.sections||[], state.sectionPending?.origin, state.sectionPending?.normal,
+      sectionDragPreview?.origin, state.showHidden]);
     if (sceneCache && !updates && sceneCache.meshes===meshes && sceneCache.objects===objects &&
         sceneCache.key===sceneKey) state.hits=sceneCache.faces;
     else {
@@ -3500,9 +3737,13 @@ function draw() {
         (state.hoverKey===face.key || (face.smooth && state.hoverKey===face.object.id));
       polygon(face.points);
       if (face.points.length > 2) {
-        ctx.fillStyle = shade(face.object.color,face.section ? .9 : face.tone);
+        const hiddenFace=state.showHidden&&face.object.hidden;
+        const grayFace=state.showHidden&&!face.object.hidden;
+        ctx.fillStyle = hiddenFace ? shade('#e8932a',Math.max(.8,face.tone)) :
+          grayFace ? shade('#aeb4ba',face.tone) :
+          shade(face.object.color,face.section ? .9 : face.tone);
         ctx.fill();
-        drawMaterialTexture(face);
+        if (!state.showHidden) drawMaterialTexture(face);
         if (selected || hovered) {
           ctx.save();
           ctx.fillStyle = selected ? selectionPattern : hoverPattern;
@@ -3510,9 +3751,11 @@ function draw() {
           ctx.restore();
         }
       }
-      ctx.strokeStyle = face.section ? '#c87936' :
+      const hiddenFace=state.showHidden&&face.object.hidden;
+      ctx.strokeStyle = hiddenFace ? '#e8932a' : face.section ? '#c87936' :
+        state.showHidden ? '#7f8a94' :
         selected ? '#c87936' : dark ? '#aeb3b7' : '#4f5150';
-      ctx.lineWidth = face.section ? 1.35 : selected ? 1.65 : .8;
+      ctx.lineWidth = hiddenFace ? 1.6 : face.section ? 1.35 : selected ? 1.65 : .8;
       if (face.edges) {
         ctx.beginPath();
         for (let i=0;i<face.edges.length;i++) {
@@ -3703,6 +3946,19 @@ function draw() {
 
 /** @param {QreaseeObject} object @returns {QreaseeMesh} */
 function previewMesh(object) {
+  if(object.shape==='mesh' && object.geometry){
+    const angle=object.rotation*Math.PI/180, sin=Math.sin(angle), cos=Math.cos(angle);
+    const spans=[object.width,object.depth,object.height].map((size,axis)=>{
+      const positions=object.geometry.vertices.map(point=>point[axis]);
+      const original=Math.max(...positions)-Math.min(...positions);
+      return original<1e-9?1:size/original;
+    });
+    return {vertices:object.geometry.vertices.map(([x,y,z])=>/** @type {QreaseePoint} */ ([
+      object.x+x*spans[0]*cos-y*spans[1]*sin,
+      object.y+x*spans[0]*sin+y*spans[1]*cos,
+      object.z+z*spans[2]])),
+      faces:object.geometry.faces,cut:false};
+  }
   if (object.shape==='circle' && object.surface_role==='side') {
     if (object.height<=0) return {vertices:[],faces:[],cut:false};
     const w=object.width/2, d=object.depth/2;
@@ -3867,19 +4123,6 @@ function pickRectangleFace(point) {
   let containing=null,fallback=null;
   for (let index=0;index<state.hits.length;index++) {
     const face=state.hits[index];
-  if(object.shape==='mesh' && object.geometry){
-    const angle=object.rotation*Math.PI/180, sin=Math.sin(angle), cos=Math.cos(angle);
-    const spans=[object.width,object.depth,object.height].map((size,axis)=>{
-      const positions=object.geometry.vertices.map(point=>point[axis]);
-      const original=Math.max(...positions)-Math.min(...positions);
-      return original<1e-9?1:size/original;
-    });
-    return {vertices:object.geometry.vertices.map(([x,y,z])=>/** @type {QreaseePoint} */ ([
-      object.x+x*spans[0]*cos-y*spans[1]*sin,
-      object.y+x*spans[0]*sin+y*spans[1]*cos,
-      object.z+z*spans[2]])),
-      faces:object.geometry.faces,cut:false};
-  }
     if (face.world.length<3) continue;
     const wall=QreaseeLine.verticalWall(face.world);
     if (!wall || !verticalFaceVisible(face,wall)) continue;
@@ -4172,7 +4415,10 @@ function offsetOutline(outline,distance) {
 canvas.addEventListener('contextmenu',event=>{
   event.preventDefault();
   if (state.layout || !state.doc) return;
-  const face=pickFace(pointer(event),false);
+  const point=pointer(event);
+  const section=sectionPlaneAt(point);
+  if (section) {showSectionMenu(section,event.clientX,event.clientY);return;}
+  const face=pickFace(point,false);
   if (!face) {hideObjectMenu();return;}
   showObjectMenu(targetId(face.object),event.clientX,event.clientY);
 });
@@ -4190,6 +4436,20 @@ canvas.addEventListener('pointerdown',event=>{
   if (event.button===0 && tool==='select') {
     const pin=commentPinAt(start);
     if (pin) {focusCommentTarget(pin.target);return;}
+  }
+  if (event.button===0 && ['select','section'].includes(tool) && !state.sectionPending) {
+    const section=sectionPlaneAt(start);
+    if (section) {
+      activeSectionId=section.id;
+      state.drag={tool:'section-move',start,section,base:section.origin,
+        normal:normalizePoint(section.normal),origin:section.origin,moved:false,offset:0};
+      canvas.setPointerCapture(event.pointerId);
+      toggleSections(true);
+      renderSections();
+      showStatus('Geser bidang sepanjang normal; lepas untuk menetapkan.');
+      redraw();
+      return;
+    }
   }
   if (event.button===0 && state.drawPending?.tool===tool) {
     const pending=state.drawPending,size=measurement(tool);
@@ -4275,6 +4535,12 @@ canvas.addEventListener('pointerdown',event=>{
       return;
     }
     if (tool==='section') {placeSectionAt(start);return;}
+    if (tool==='bucket') {
+      const face=pickFace(start,false);
+      if (!face) {showStatus('Klik permukaan objek untuk menerapkan material.');return;}
+      paintMaterial(targetId(face.object),bucketMaterial);
+      return;
+    }
     let face=pickFace(start,tool!=='pull');
     let planeWall=null;
     if (tool==='rectangle'||tool==='circle') {
@@ -4607,6 +4873,20 @@ canvas.addEventListener('pointermove',event=>{
   }
   state.inference=null;
   const dx=point[0]-drag.start[0], dy=point[1]-drag.start[1];
+  if (drag.tool==='section-move') {
+    const distance=sectionAxisDistance(point,drag.base,drag.normal);
+    if (distance!==null) {
+      const value=state.snapping?snap(distance,.05):round(distance);
+      drag.offset=value;
+      drag.origin=/** @type {QreaseePoint} */ (drag.base.map(
+        (coordinate,index)=>coordinate+drag.normal[index]*value));
+      drag.moved=Math.abs(value)>.001||drag.moved;
+      sectionDragPreview={section:drag.section,origin:drag.origin};
+      showStatus('Geser bidang '+lengthLabel(value)+' sepanjang normal.');
+    }
+    redraw();
+    return;
+  }
   if (drag.tool==='erase') {
     eraseLinesAlong(drag.last,point,drag.seen);
     drag.last=point;
@@ -4709,6 +4989,24 @@ canvas.addEventListener('pointerup',()=>{
   const drag=state.drag;
   state.drag=null;
   if (state.cursor) delete state.cursor.line;
+  if (drag?.tool==='section-move') {
+    if (drag.moved) {
+      const after={...drag.section,origin:roundPoint(drag.origin)};
+      commit({type:'section',before:drag.section,after}).then(saved=>{
+        sectionDragPreview=null;
+        if (saved) {
+          activeSectionId=after.id;
+          showStatus('Bidang potong digeser.');
+        }
+        redraw();
+      });
+    } else {
+      sectionDragPreview=null;
+      showStatus('Bidang potong dipilih. Geser atau tekan Delete untuk menghapus.');
+    }
+    redraw();
+    return;
+  }
   if (drag?.tool==='erase') {
     const targets=eraseLineTargets(drag.seen);
     if (targets.length) batch(targets,[],[]).then(deleted=>{
@@ -4760,7 +5058,9 @@ canvas.addEventListener('pointerup',()=>{
   redraw();
 });
 canvas.addEventListener('lostpointercapture',()=>{
-  if (state.drag || state.linePress) { state.drag=null; state.linePress=null; redraw(); }
+  if (state.drag || state.linePress) {
+    state.drag=null; state.linePress=null; sectionDragPreview=null; redraw();
+  }
 });
 window.addEventListener('keydown',event=>{
   const dialog=document.querySelector('dialog[open]');
@@ -4815,6 +5115,9 @@ window.addEventListener('keydown',event=>{
   if (key==='DELETE' || key==='BACKSPACE') {
     if (state.layout || event.ctrlKey || event.metaKey || event.altKey) return;
     event.preventDefault();
+    const section=activeSectionId
+      ? sectionPlanes().find(item=>item.id===activeSectionId) : null;
+    if (section) {removeSection(section);return;}
     removeObject();
     return;
   }
@@ -4843,6 +5146,12 @@ window.addEventListener('keydown',event=>{
     setTool('select');redraw();return;
   }
   if (key==='F' && event.shiftKey) { event.preventDefault(); fit();return; }
+  if (key==='H') {
+    event.preventDefault();
+    if (event.shiftKey) setHiddenMode(!state.showHidden);
+    else toggleHideSelection();
+    return;
+  }
   if (key==='G' || key==='Q') {
     if (!canEditModel()) {showStatus('Akses ini tidak dapat mengubah model.');return;}
     event.preventDefault();createContainer(key==='Q');return;
@@ -5310,6 +5619,7 @@ $('#layout-grid-name').onchange=event=>{
 $('#layout-delete').onclick=()=>{
   if(!layoutSelected)return;
   const layout=sheetLayout();
+  const deletingActiveView=layoutSelected.kind==='view'&&layoutSelected.id===layoutActiveViewId;
   const next=layoutSelected.kind==='view'
     ?{...layout,views:layout.views.filter(item=>item.id!==layoutSelected.id),
       gridLines:(layout.gridLines||[]).filter(item=>item.viewId!==layoutSelected.id),
@@ -5336,4 +5646,3 @@ setInterval(()=>{
 if (roomFromHash()) openRoom();
 else if (window.qreaseeAuth) window.qreaseeAuth.ready.then(()=>renderProjectHome());
 else renderProjectHome();
-  const deletingActiveView=layoutSelected.kind==='view'&&layoutSelected.id===layoutActiveViewId;
