@@ -20,13 +20,16 @@ const html = fs.readFileSync(path.join(root, 'web', 'index.html'), 'utf8')
   .replace('href="/studio.css"', 'href="./studio.css"')
   .replace('src="/line-geometry.js"', 'src="./line-geometry.js"')
   .replace('</head>', (auth ? '  <link rel="stylesheet" href="./auth.css">\n' : '') + '</head>')
-  .replace('<body>', '<body>' + (auth ? '\n  <div id="auth-gate" role="dialog" aria-modal="true" aria-labelledby="auth-title">\n    <div class="auth-card">\n      <h1 id="auth-title">Masuk ke Qreasee</h1>\n      <p>Gunakan akun Google untuk membuka dan mengedit proyek bersama.</p>\n      <button id="google-login" disabled>Masuk dengan Google</button>\n      <p id="auth-message" role="status">Memeriksa sesi…</p>\n    </div>\n  </div>' : ''))
+  .replace(/(<body\b[^>]*>)/i, (_, bodyTag) => bodyTag + (auth ? '\n  <div id="auth-gate" role="dialog" aria-modal="true" aria-labelledby="auth-title">\n    <div class="auth-card">\n      <h1 id="auth-title">Masuk ke Qreasee</h1>\n      <p>Gunakan akun Google untuk membuka dan mengedit proyek bersama.</p>\n      <button id="google-login" disabled>Masuk dengan Google</button>\n      <p id="auth-message" role="status">Memeriksa sesi…</p>\n    </div>\n  </div>' : ''))
   .replace('<script src="/studio.js" defer></script>',
     '<script src="./demo.js" defer></script>\n  ' +
     (cloud ? '<script src="./cloud-config.js" defer></script>\n  ' +
       (auth ? '<script src="./auth.js" defer></script>\n  ' : '') +
       '<script src="./cloud.js" defer></script>\n  ' : '') +
     '<script src="./studio.js" defer></script>');
+if (auth && !html.includes('id="auth-gate"')) {
+  throw new Error('Authenticated demo must include the sign-in gate.');
+}
 fs.writeFileSync(path.join(output, 'index.html'), html);
 for (const name of ['studio.css', 'studio.js', 'line-geometry.js', 'qreasee-logo.png', 'qreasee-logo-black.png']) {
   fs.copyFileSync(path.join(root, 'web', name), path.join(output, name));
