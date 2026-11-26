@@ -21,7 +21,10 @@ var QreaseeLine = (() => {
   var line_geometry_exports = {};
   __export(line_geometry_exports, {
     axisSnap: () => axisSnap,
+    boxHitsGeometry: () => boxHitsGeometry,
     closedLoop: () => closedLoop,
+    connectedFaces: () => connectedFaces,
+    connectedLines: () => connectedLines,
     polygonFromLoop: () => polygonFromLoop,
     triangulate: () => triangulate
   });
@@ -149,6 +152,113 @@ var QreaseeLine = (() => {
       depth,
       profile: { points: ring.map((point) => [(point[0] - x) / width, (point[1] - y) / depth]), inferred: true }
     };
+  }
+  var insideBox = (point, box) => point[0] >= box.left && point[0] <= box.right && point[1] >= box.top && point[1] <= box.bottom;
+  function segmentCrossesBox(a, b, box) {
+    if (insideBox(a, box) || insideBox(b, box)) return true;
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    let low = 0, high = 1;
+    for (const [p, q] of [
+      [-dx, a[0] - box.left],
+      [dx, box.right - a[0]],
+      [-dy, a[1] - box.top],
+      [dy, box.bottom - a[1]]
+    ]) {
+      if (Math.abs(p) < 1e-12) {
+        if (q < 0) return false;
+      } else {
+        const t = q / p;
+        if (p < 0) low = Math.max(low, t);
+        else high = Math.min(high, t);
+        if (low > high) return false;
+      }
+    }
+    return true;
+  }
+  function pointInPolygon(point, polygon) {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const a = polygon[i], b = polygon[j];
+      if (a[1] > point[1] !== b[1] > point[1] && point[0] < (b[0] - a[0]) * (point[1] - a[1]) / (b[1] - a[1]) + a[0]) inside = !inside;
+    }
+    return inside;
+  }
+  function boxHitsGeometry(points, box, crossing) {
+    if (!points.length) return false;
+    if (!crossing) return points.every((point) => insideBox(point, box));
+    if (points.some((point) => insideBox(point, box))) return true;
+    const count = points.length;
+    for (let i = 0; i < (count === 2 ? 1 : count); i++) {
+      if (segmentCrossesBox(points[i], points[(i + 1) % count], box)) return true;
+    }
+    return count > 2 && [
+      [box.left, box.top],
+      [box.right, box.top],
+      [box.right, box.bottom],
+      [box.left, box.bottom]
+    ].some((corner) => pointInPolygon(corner, points));
+  }
+  function connectedLines(seedId, lines) {
+    const byPoint = /* @__PURE__ */ new Map();
+    for (const line of lines) {
+      if (line.shape !== "line") continue;
+      for (const point of endpoints(line)) {
+        const vertex = point.map((value) => Math.round(value * precision)).join(":");
+        if (!byPoint.has(vertex)) byPoint.set(vertex, /* @__PURE__ */ new Set());
+        byPoint.get(vertex).add(line.id);
+      }
+    }
+    const seed = lines.find((line) => line.id === seedId);
+    if (!seed || seed.shape !== "line") return [];
+    const selected = /* @__PURE__ */ new Set([seedId]), queue = [seedId];
+    const byId = new Map(lines.map((line) => [line.id, line]));
+    for (const id of queue) {
+      for (const point of endpoints(byId.get(id))) {
+        const vertex = point.map((value) => Math.round(value * precision)).join(":");
+        for (const next of byPoint.get(vertex) ?? []) {
+          if (!selected.has(next)) {
+            selected.add(next);
+            queue.push(next);
+          }
+        }
+      }
+    }
+    return queue;
+  }
+  function connectedFaces(seedId, entries) {
+    const byEdge = /* @__PURE__ */ new Map();
+    const edgesById = /* @__PURE__ */ new Map();
+    const vertexKey = (point) => point.map((value) => Math.round(value * precision)).join(":");
+    for (const { object, mesh } of entries) {
+      if (object.shape === "line") continue;
+      const edges = /* @__PURE__ */ new Set();
+      for (const face of mesh.faces) {
+        for (let i = 0; i < face.length; i++) {
+          const a = mesh.vertices[face[i]], b = mesh.vertices[face[(i + 1) % face.length]];
+          if (!a || !b) continue;
+          const ends = [vertexKey(a), vertexKey(b)].sort();
+          if (ends[0] === ends[1]) continue;
+          const edge = ends.join("|");
+          edges.add(edge);
+          if (!byEdge.has(edge)) byEdge.set(edge, /* @__PURE__ */ new Set());
+          byEdge.get(edge).add(object.id);
+        }
+      }
+      edgesById.set(object.id, edges);
+    }
+    if (!edgesById.has(seedId)) return [];
+    const selected = /* @__PURE__ */ new Set([seedId]), queue = [seedId];
+    for (const id of queue) {
+      for (const edge of edgesById.get(id) ?? []) {
+        for (const next of byEdge.get(edge) ?? []) {
+          if (!selected.has(next)) {
+            selected.add(next);
+            queue.push(next);
+          }
+        }
+      }
+    }
+    return queue;
   }
   return __toCommonJS(line_geometry_exports);
 })();

@@ -148,3 +148,114 @@ export function polygonFromLoop(loop: readonly Point[]): {
   return { x, y, z: loop[0][2], width, depth,
     profile: { points: ring.map(point => [(point[0] - x) / width, (point[1] - y) / depth]), inferred: true } };
 }
+
+export type Box = { left: number; top: number; right: number; bottom: number };
+
+const insideBox = (point: readonly number[], box: Box): boolean =>
+  point[0] >= box.left && point[0] <= box.right &&
+  point[1] >= box.top && point[1] <= box.bottom;
+
+function segmentCrossesBox(a: readonly number[], b: readonly number[], box: Box): boolean {
+  if (insideBox(a, box) || insideBox(b, box)) return true;
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  let low = 0, high = 1;
+  for (const [p, q] of [
+    [-dx, a[0] - box.left], [dx, box.right - a[0]],
+    [-dy, a[1] - box.top], [dy, box.bottom - a[1]]
+  ]) {
+    if (Math.abs(p) < 1e-12) { if (q < 0) return false; }
+    else {
+      const t = q / p;
+      if (p < 0) low = Math.max(low, t);
+      else high = Math.min(high, t);
+      if (low > high) return false;
+    }
+  }
+  return true;
+}
+
+function pointInPolygon(point: readonly number[], polygon: readonly (readonly number[])[]): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i], b = polygon[j];
+    if ((a[1] > point[1]) !== (b[1] > point[1]) &&
+        point[0] < (b[0] - a[0]) * (point[1] - a[1]) / (b[1] - a[1]) + a[0]) inside = !inside;
+  }
+  return inside;
+}
+
+export function boxHitsGeometry(points: readonly (readonly number[])[], box: Box, crossing: boolean): boolean {
+  if (!points.length) return false;
+  if (!crossing) return points.every(point => insideBox(point, box));
+  if (points.some(point => insideBox(point, box))) return true;
+  const count = points.length;
+  for (let i = 0; i < (count === 2 ? 1 : count); i++) {
+    if (segmentCrossesBox(points[i], points[(i + 1) % count], box)) return true;
+  }
+  return count > 2 && [
+    [box.left, box.top], [box.right, box.top],
+    [box.right, box.bottom], [box.left, box.bottom]
+  ].some(corner => pointInPolygon(corner, points));
+}
+
+export function connectedLines(seedId: string, lines: readonly (LineObject & { id: string })[]): string[] {
+  const byPoint = new Map<string, Set<string>>();
+  for (const line of lines) {
+    if (line.shape !== 'line') continue;
+    for (const point of endpoints(line)) {
+      const vertex = point.map(value => Math.round(value * precision)).join(':');
+      if (!byPoint.has(vertex)) byPoint.set(vertex, new Set());
+      byPoint.get(vertex)!.add(line.id);
+    }
+  }
+  const seed = lines.find(line => line.id === seedId);
+  if (!seed || seed.shape !== 'line') return [];
+  const selected = new Set<string>([seedId]), queue = [seedId];
+  const byId = new Map(lines.map(line => [line.id, line]));
+  for (const id of queue) {
+    for (const point of endpoints(byId.get(id)!)) {
+      const vertex = point.map(value => Math.round(value * precision)).join(':');
+      for (const next of byPoint.get(vertex) ?? []) {
+        if (!selected.has(next)) { selected.add(next); queue.push(next); }
+      }
+    }
+  }
+  return queue;
+}
+
+export interface MeshGeometry { vertices: Point[]; faces: number[][] }
+export function connectedFaces(
+  seedId: string,
+  entries: readonly { object: { id: string; shape: string }; mesh: MeshGeometry }[]
+): string[] {
+  const byEdge = new Map<string, Set<string>>();
+  const edgesById = new Map<string, Set<string>>();
+  const vertexKey = (point: Point): string => point.map(value => Math.round(value * precision)).join(':');
+  for (const { object, mesh } of entries) {
+    if (object.shape === 'line') continue;
+    const edges = new Set<string>();
+    for (const face of mesh.faces) {
+      for (let i = 0; i < face.length; i++) {
+        const a = mesh.vertices[face[i]], b = mesh.vertices[face[(i + 1) % face.length]];
+        if (!a || !b) continue;
+        const ends = [vertexKey(a), vertexKey(b)].sort();
+        if (ends[0] === ends[1]) continue;
+        const edge = ends.join('|');
+        edges.add(edge);
+        if (!byEdge.has(edge)) byEdge.set(edge, new Set());
+        byEdge.get(edge)!.add(object.id);
+      }
+    }
+    edgesById.set(object.id, edges);
+  }
+  if (!edgesById.has(seedId)) return [];
+  const selected = new Set<string>([seedId]), queue = [seedId];
+  for (const id of queue) {
+    for (const edge of edgesById.get(id) ?? []) {
+      for (const next of byEdge.get(edge) ?? []) {
+        if (!selected.has(next)) { selected.add(next); queue.push(next); }
+      }
+    }
+  }
+  return queue;
+}
