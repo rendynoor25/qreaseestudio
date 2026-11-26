@@ -63,6 +63,10 @@ pub struct Object {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wall_axis: Option<[f64; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane_u: Option<Point>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane_v: Option<Point>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub solid_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface_role: Option<String>,
@@ -96,10 +100,21 @@ impl Object {
                 .all(bounded)
             && dimensions.into_iter().all(bounded)
             && self.wall_axis.is_none_or(|axis| {
-                self.shape == Shape::Rectangle
+                matches!(self.shape, Shape::Rectangle | Shape::Polygon)
                     && axis.iter().all(|value| value.is_finite())
                     && (axis[0].hypot(axis[1]) - 1.0).abs() < 1e-5
             })
+            && match (self.plane_u, self.plane_v) {
+                (None, None) => true,
+                (Some(u), Some(v)) => {
+                    self.shape == Shape::Polygon && self.wall_axis.is_none()
+                        && u.into_iter().chain(v).all(bounded)
+                        && (u.iter().map(|x| x*x).sum::<f64>()-1.0).abs()<1e-5
+                        && (v.iter().map(|x| x*x).sum::<f64>()-1.0).abs()<1e-5
+                        && u.iter().zip(v).map(|(a,b)| a*b).sum::<f64>().abs()<1e-5
+                },
+                _ => false,
+            }
             && self.solid_id.as_ref().is_none_or(|id| uuid::Uuid::parse_str(id).is_ok())
             && self.surface_role.as_ref().is_none_or(|role| {
                 self.solid_id.is_some()
@@ -163,14 +178,42 @@ impl Object {
     }
 
     pub fn mesh(&self) -> Mesh {
+        if let (Some(u),Some(v),Some(profile)) = (self.plane_u,self.plane_v,&self.profile) {
+            let normal=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
+            let count=profile.points.len();
+            let mut vertices:Vec<Point>=profile.points.iter().map(|p| {
+                [self.x+u[0]*p[0]*self.width+v[0]*p[1]*self.depth,
+                 self.y+u[1]*p[0]*self.width+v[1]*p[1]*self.depth,
+                 self.z+u[2]*p[0]*self.width+v[2]*p[1]*self.depth]
+            }).collect();
+            let triangles=crate::topology::triangulate(&profile.points);
+            let top:Vec<Vec<usize>>=triangles.iter().map(|triangle|triangle.to_vec()).collect();
+            let mut faces=top.clone();
+            if self.height>0.0 {
+                vertices.extend((0..count).map(|i| {
+                    [vertices[i][0]+normal[0]*self.height,
+                     vertices[i][1]+normal[1]*self.height,
+                     vertices[i][2]+normal[2]*self.height]
+                }).collect::<Vec<_>>());
+                faces=top.iter().map(|face|face.iter().rev().copied().collect()).collect();
+                for i in 0..count {faces.push(vec![i,(i+1)%count,(i+1)%count+count,i+count]);}
+                faces.extend(top.iter().map(|face|face.iter().map(|i|i+count).collect()));
+            }
+            return Mesh{vertices,faces,cut:false,cap:Some(triangles)};
+        }
         if let Some(axis) = self.wall_axis {
             let (sin, cos) = self.rotation.to_radians().sin_cos();
             let u = [axis[0] * cos - axis[1] * sin, axis[0] * sin + axis[1] * cos];
             let n = [u[1], -u[0]];
             let w = self.width / 2.0;
             let d = self.depth / 2.0;
-            let mut vertices: Vec<Point> = [[-w, -d], [w, -d], [w, d], [-w, d]]
-                .into_iter()
+            let outline: Vec<_> = if let Some(profile) = &self.profile {
+                profile.points.iter().map(|p| [p[0] * self.width, p[1] * self.depth]).collect()
+            } else {
+                vec![[-w, -d], [w, -d], [w, d], [-w, d]]
+            };
+            let count = outline.len();
+            let mut vertices: Vec<Point> = outline.into_iter()
                 .map(|[along, vertical]| {
                     [
                         self.x + along * u[0],
@@ -179,10 +222,15 @@ impl Object {
                     ]
                 })
                 .collect();
-            let mut faces = vec![vec![0, 1, 2, 3]];
+            let cap = self.profile.as_ref().map(|profile| crate::topology::triangulate(&profile.points));
+            let top: Vec<Vec<usize>> = cap.as_ref().map_or_else(
+                || vec![(0..count).collect()],
+                |triangles| triangles.iter().map(|triangle| triangle.to_vec()).collect(),
+            );
+            let mut faces = top.clone();
             if self.height > 0.0 {
                 vertices.extend(
-                    (0..4)
+                    (0..count)
                         .map(|i| {
                             let point = vertices[i];
                             [
@@ -193,17 +241,17 @@ impl Object {
                         })
                         .collect::<Vec<_>>(),
                 );
-                faces = vec![vec![3, 2, 1, 0]];
-                for i in 0..4 {
-                    faces.push(vec![i, (i + 1) % 4, (i + 1) % 4 + 4, i + 4]);
+                faces = top.iter().map(|face| face.iter().rev().copied().collect()).collect();
+                for i in 0..count {
+                    faces.push(vec![i, (i + 1) % count, (i + 1) % count + count, i + count]);
                 }
-                faces.push(vec![4, 5, 6, 7]);
+                faces.extend(top.iter().map(|face| face.iter().map(|index| index + count).collect()));
             }
             return Mesh {
                 vertices,
                 faces,
                 cut: false,
-                cap: None,
+                cap,
             };
         }
         let outline = self.footprint();
@@ -247,6 +295,13 @@ impl Object {
     }
 
     pub fn plan(&self, elevation: f64) -> Mesh {
+        if self.plane_u.is_some() {
+            let mesh=self.mesh();
+            if mesh.vertices.iter().all(|point|point[2]>elevation) {
+                return Mesh{vertices:Vec::new(),faces:Vec::new(),cut:false,cap:None};
+            }
+            return mesh;
+        }
         if let Some(axis) = self.wall_axis {
             if self.z - self.depth / 2.0 > elevation {
                 return Mesh {
@@ -566,6 +621,8 @@ pub fn demo() -> Document {
             container: None,
             profile: None,
             wall_axis: None,
+            plane_u: None,
+            plane_v: None,
             solid_id: None,
             surface_role: None,
             opening_id: None,
@@ -685,6 +742,26 @@ mod tests {
         assert!(plan.vertices.iter().all(|point| point[2] == 1.2));
         rectangle.wall_axis = Some([2.0, 0.0]);
         assert!(!rectangle.valid());
+    }
+
+    #[test]
+    fn three_point_inclined_face_renders_and_extrudes() {
+        let mut face=demo().objects.remove(0);
+        face.shape=Shape::Polygon;
+        face.height=0.0;
+        face.plane_u=Some([2.0/(5.0_f64).sqrt(),0.0,1.0/(5.0_f64).sqrt()]);
+        face.plane_v=Some([0.0,1.0,0.0]);
+        face.x=1.0;face.y=1.0;face.z=0.5;
+        face.width=(5.0_f64).sqrt();face.depth=2.0;
+        face.profile=Some(Box::new(Profile{points:vec![[-0.5,-0.5],[0.5,-0.5],[0.0,0.5]],inferred:true}));
+        assert!(face.valid());
+        let mesh=face.mesh();
+        assert_eq!(mesh.vertices.len(),3);
+        assert_eq!(mesh.faces.len(),1);
+        face.height=0.4;
+        assert!(face.valid());
+        assert_eq!(face.mesh().vertices.len(),6);
+        assert_eq!(face.mesh().faces.len(),5);
     }
 
     #[test]

@@ -37,6 +37,8 @@ interface QreaseeObject {
   container?: QreaseeMembership | null;
   profile?: QreaseeProfile | null;
   wall_axis?: QreaseePoint2 | null;
+  plane_u?: QreaseePoint | null;
+  plane_v?: QreaseePoint | null;
   solid_id?: string | null;
   surface_role?: 'top' | 'bottom' | 'side' | 'edge' | 'pocket' | null;
   opening_id?: string | null;

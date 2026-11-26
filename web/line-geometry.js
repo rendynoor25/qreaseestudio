@@ -30,6 +30,7 @@ var QreaseeLine = (() => {
     polygonFromLoop: () => polygonFromLoop,
     radiusArc: () => radiusArc,
     rectangleInFrame: () => rectangleInFrame,
+    splitCrossingLines: () => splitCrossingLines,
     splitRectangle: () => splitRectangle,
     triangulate: () => triangulate,
     verticalRectangle: () => verticalRectangle,
@@ -165,7 +166,7 @@ var QreaseeLine = (() => {
     });
   }
   var precision = 1e5;
-  var key = (point) => point.slice(0, 2).map((value) => Math.round(value * precision)).join(":");
+  var key = (point) => point.map((value) => Math.round(value * precision)).join(":");
   var cross = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
   function axisSnap(start, pointer, project, step = 0.25, tolerance = 12) {
     const origin = project(start);
@@ -206,6 +207,72 @@ var QreaseeLine = (() => {
       [line.x + dx / 2, line.y + dy / 2, line.z + line.height]
     ];
   }
+  var difference3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  var along3 = (a, direction, t) => [a[0] + direction[0] * t, a[1] + direction[1] * t, a[2] + direction[2] * t];
+  function crossings(first, second) {
+    const [a, b] = endpoints(first), [c, d] = endpoints(second);
+    const u = difference3(b, a), v = difference3(d, c), w = difference3(c, a);
+    const aa = dot3(u, u), bb = dot3(u, v), cc = dot3(v, v), denominator = aa * cc - bb * bb;
+    if (aa < 1e-10 || cc < 1e-10) return [];
+    if (denominator > 1e-10 * aa * cc) {
+      const t = (dot3(w, u) * cc - dot3(w, v) * bb) / denominator;
+      const s = (dot3(w, u) * bb - dot3(w, v) * aa) / denominator;
+      return t >= -1e-6 && t <= 1 + 1e-6 && s >= -1e-6 && s <= 1 + 1e-6 && Math.hypot(...difference3(along3(a, u, t), along3(c, v, s))) < 1e-5 ? [[t, s]] : [];
+    }
+    const projected = (point, start, direction, length) => dot3(difference3(point, start), direction) / length;
+    if (Math.hypot(...difference3(along3(a, u, projected(c, a, u, aa)), c)) > 1e-5) return [];
+    const pairs = [];
+    for (const [point, t] of [[a, 0], [b, 1]]) {
+      const s = projected(point, c, v, cc);
+      if (s >= -1e-6 && s <= 1 + 1e-6) pairs.push([t, s]);
+    }
+    for (const [point, s] of [[c, 0], [d, 1]]) {
+      const t = projected(point, a, u, aa);
+      if (t >= -1e-6 && t <= 1 + 1e-6) pairs.push([t, s]);
+    }
+    return pairs;
+  }
+  function splitCrossingLines(existing, incoming, newId) {
+    const scope = incoming.container?.id ?? null;
+    const sources = existing.filter((line) => line.shape === "line" && !line.solid_id && (line.container?.id ?? null) === scope);
+    const fractions = /* @__PURE__ */ new Map([[incoming, [0, 1]]]);
+    for (const line of sources) {
+      const pairs = crossings(incoming, line);
+      if (!pairs.length) continue;
+      const cuts = fractions.get(line) ?? [0, 1];
+      for (const [t, s] of pairs) {
+        fractions.get(incoming).push(t);
+        cuts.push(s);
+      }
+      fractions.set(line, cuts);
+    }
+    const before = [], after = [];
+    for (const [line, cuts] of fractions) {
+      const ordered = [...new Set(cuts.filter((t) => t >= -1e-6 && t <= 1 + 1e-6).map((t) => Math.max(0, Math.min(1, t)).toFixed(8)))].map(Number).sort((a, b) => a - b);
+      if (ordered.length <= 2) {
+        if (line === incoming) after.push(line);
+        continue;
+      }
+      const [start, end] = endpoints(line), direction = difference3(end, start);
+      const pieces = ordered.slice(0, -1).map((t, index) => {
+        const a = along3(start, direction, t), b = along3(start, direction, ordered[index + 1]);
+        return {
+          ...line,
+          id: index ? newId() : line.id,
+          rotation: 0,
+          x: (a[0] + b[0]) / 2,
+          y: (a[1] + b[1]) / 2,
+          z: a[2],
+          width: b[0] - a[0],
+          depth: b[1] - a[1],
+          height: b[2] - a[2]
+        };
+      }).filter((part) => Math.hypot(part.width, part.depth, part.height) > 1e-3);
+      if (line !== incoming) before.push(line);
+      after.push(...pieces);
+    }
+    return { before, after };
+  }
   function triangulate(points) {
     const remaining = points.map((_, index) => index);
     const triangles = [];
@@ -228,14 +295,14 @@ var QreaseeLine = (() => {
     return triangles;
   }
   function closedLoop(existing, edge) {
-    if (edge.shape !== "line" || edge.solid_id || Math.abs(edge.height) > 1e-5) return null;
+    if (edge.shape !== "line" || edge.solid_id) return null;
     const [a, b] = endpoints(edge);
     const start = key(b), goal = key(a);
     if (start === goal) return null;
     const adjacency = /* @__PURE__ */ new Map();
     const points = /* @__PURE__ */ new Map();
     for (const line of existing) {
-      if (line.shape !== "line" || line.solid_id || Math.abs(line.height) > 1e-5 || Math.abs(line.z - edge.z) > 1e-5 || (line.container?.id ?? null) !== (edge.container?.id ?? null)) continue;
+      if (line.shape !== "line" || line.solid_id || (line.container?.id ?? null) !== (edge.container?.id ?? null)) continue;
       const [first, second] = endpoints(line);
       const u = key(first), v = key(second);
       if (u === v) continue;
@@ -264,7 +331,31 @@ var QreaseeLine = (() => {
     return loop.length >= 3 ? loop : null;
   }
   function polygonFromLoop(loop) {
-    const ring = loop.map((point) => [point[0], point[1]]);
+    const horizontal = loop.every((point) => Math.abs(point[2] - loop[0][2]) < 1e-5);
+    let basisU, basisV;
+    if (!horizontal) {
+      const origin = loop[0];
+      const first = loop.find((point) => Math.hypot(...difference3(point, origin)) > 1e-5);
+      if (!first) return null;
+      const direction = difference3(first, origin), length = Math.hypot(...direction);
+      basisU = direction.map((value) => value / length);
+      const second = loop.find((point) => {
+        const delta2 = difference3(point, origin), parallel = dot3(delta2, basisU);
+        return Math.hypot(...difference3(delta2, basisU.map((value) => value * parallel))) > 1e-5;
+      });
+      if (!second) return null;
+      const delta = difference3(second, origin), along = dot3(delta, basisU);
+      const transverse = difference3(delta, basisU.map((value) => value * along));
+      const span = Math.hypot(...transverse);
+      basisV = transverse.map((value) => value / span);
+      const normal = [
+        basisU[1] * basisV[2] - basisU[2] * basisV[1],
+        basisU[2] * basisV[0] - basisU[0] * basisV[2],
+        basisU[0] * basisV[1] - basisU[1] * basisV[0]
+      ];
+      if (loop.some((point) => Math.abs(dot3(difference3(point, origin), normal)) > 1e-5)) return null;
+    }
+    const ring = loop.map((point) => horizontal ? [point[0], point[1]] : [dot3(difference3(point, loop[0]), basisU), dot3(difference3(point, loop[0]), basisV)]);
     if (ring.length < 3 || ring.length > 250) return null;
     const area = ring.reduce((sum, point, i) => sum + point[0] * ring[(i + 1) % ring.length][1] - ring[(i + 1) % ring.length][0] * point[1], 0);
     if (Math.abs(area) < 1e-8) return null;
@@ -281,11 +372,12 @@ var QreaseeLine = (() => {
     if (width < 1e-3 || depth < 1e-3) return null;
     const x = (minX + maxX) / 2, y = (minY + maxY) / 2;
     return {
-      x,
-      y,
-      z: loop[0][2],
+      x: horizontal ? x : loop[0][0] + x * basisU[0] + y * basisV[0],
+      y: horizontal ? y : loop[0][1] + x * basisU[1] + y * basisV[1],
+      z: horizontal ? loop[0][2] : loop[0][2] + x * basisU[2] + y * basisV[2],
       width,
       depth,
+      ...horizontal ? {} : { plane_u: basisU, plane_v: basisV },
       profile: { points: ring.map((point) => [(point[0] - x) / width, (point[1] - y) / depth]), inferred: true }
     };
   }

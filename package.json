@@ -2,6 +2,7 @@
   "private": true,
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
+    "test:geometry": "node scripts/build-line.cjs && node scripts/test-line-geometry.cjs",
     "build:line": "node scripts/build-line.cjs",
     "build:demo": "node scripts/build-demo.cjs"
   },

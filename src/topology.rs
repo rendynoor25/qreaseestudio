@@ -325,6 +325,8 @@ fn new_face(region: &Loop) -> Option<Object> {
             inferred: true,
         })),
         wall_axis: None,
+        plane_u: None,
+        plane_v: None,
         solid_id: None,
         surface_role: None,
         opening_id: None,
@@ -377,6 +379,7 @@ fn add_faces<'a>(
             object.height == 0.0
                 && object.solid_id.is_none()
                 && object.wall_axis.is_none()
+                && object.plane_u.is_none()
                 && matches!(object.shape, Shape::Polygon | Shape::Rectangle)
         })
         .map(existing_face)
@@ -455,6 +458,8 @@ mod tests {
             container: None,
             profile: None,
             wall_axis: None,
+            plane_u: None,
+            plane_v: None,
             solid_id: None,
             surface_role: None,
             opening_id: None,
