@@ -1017,14 +1017,16 @@ function connectionFaces(source,targetCenter,solidId,openingId=null,openingOrigi
     else Object.assign(side,{width:edgeLength,depth:offsetLength,
       rotation:Math.atan2(edgeVector[1],edgeVector[0])*180/Math.PI});
     sides.push(side);
-    for(const [first,second] of [[a,b],[c,d]]) {
-      const edge=lineObject(first,second,'Tepi');
-      if(edge) edges.push({...edge,color:source.color,container:source.container??null,
+    if (!openingId) {
+      for(const [first,second] of [[a,b],[c,d]]) {
+        const edge=lineObject(first,second,'Tepi');
+        if(edge) edges.push({...edge,color:source.color,container:source.container??null,
+          solid_id:solidId,surface_role:'edge',...opening});
+      }
+      const upright=lineObject(a,c,'Tepi');
+      if(upright) edges.push({...upright,color:source.color,container:source.container??null,
         solid_id:solidId,surface_role:'edge',...opening});
     }
-    const upright=lineObject(a,c,'Tepi');
-    if(upright) edges.push({...upright,color:source.color,container:source.container??null,
-      solid_id:solidId,surface_role:'edge',...opening});
   }
   return [...sides,...edges];
 }
@@ -1081,6 +1083,14 @@ function openingProjection(face,bottom) {
   return shiftSurface({...face,height:0},normal.map(value=>value*distance));
 }
 
+function openingHostPieces(face,origin) {
+  const normal=surfaceNormal(face),offset=dotPoint(normal,origin);
+  return objects().filter(item=>item.id!==face.id && item.solid_id===face.solid_id &&
+    item.surface_role==='side' && !item.opening_id &&
+    Math.abs(dotPoint(surfaceNormal(item),normal)-1)<1e-4 &&
+    Math.abs(dotPoint(normal,[item.x,item.y,item.z])-offset)<1e-4);
+}
+
 function cutOpening(face,bottom,origin) {
   const projected=openingProjection(face,bottom);
   const bottomStrips=QreaseeLine.splitRectangle(bottom,projected);
@@ -1089,7 +1099,9 @@ function cutOpening(face,bottom,origin) {
   const pieces=bottomStrips.map((geometry,index)=>({...bottom,...geometry,
     id:index===0?bottom.id:identity(),name:index===0?bottom.name:'Bidang bawah'}));
   const walls=connectionFaces(projected,origin,face.solid_id,face.opening_id,origin);
-  return batch([face,bottom,...oldOpening],[...pieces,...walls],[]);
+  const hostPieces=openingHostPieces(face,origin);
+  return batch([face,bottom,...oldOpening,...hostPieces],
+    [...pieces,...walls,...hostPieces.map(item=>({...item,hide_edges:true}))],[]);
 }
 
 function pocketOpening(face,bottom,target,origin) {
@@ -1097,15 +1109,18 @@ function pocketOpening(face,bottom,target,origin) {
   const normal=surfaceNormal(face);
   const offset=normal.reduce((sum,value,i)=>sum+value*(target[i]-origin[i]),0);
   const opposite=normal.reduce((sum,value,i)=>sum+value*(surfaceCenter(bottom)[i]-origin[i]),0);
+  const hostPieces=openingHostPieces(face,origin);
   if (offset>=-.001) {
     const restored={...face,x:origin[0],y:origin[1],z:origin[2],height:0,surface_role:'top'};
-    return batch([face,...oldOpening],[restored],[restored.id]);
+    return batch([face,...oldOpening,...hostPieces],
+      [restored,...hostPieces.map(item=>({...item,hide_edges:false}))],[restored.id]);
   }
   if (offset<=opposite+.001) return cutOpening(face,bottom,origin);
   const floor={...face,x:target[0],y:target[1],z:target[2],height:0,
     surface_role:'pocket',opening_origin:origin};
   const walls=connectionFaces(floor,origin,face.solid_id,face.opening_id,origin);
-  return batch([face,...oldOpening],[floor,...walls],[floor.id]);
+  return batch([face,...oldOpening,...hostPieces],
+    [floor,...walls,...hostPieces.map(item=>({...item,hide_edges:true}))],[floor.id]);
 }
 
 function shellFromCircle(source,extruded) {
@@ -1184,21 +1199,57 @@ function rebuildRectangleSolid(before,after) {
   const newSides=parts.filter(item=>item.surface_role==='side');
   newSides.forEach((side,index)=>{
     const old=oldSides[index];
-    if (old) { side.id=old.id; side.name=old.name; side.color=old.color; }
+    if (old) { side.id=old.id; side.name=old.name; side.color=old.color; if(old.hide_edges) side.hide_edges=true; }
   });
+  const quietSolid=all.some(item=>item.hide_edges);
+  const visibleParts=quietSolid?parts.filter(item=>item.surface_role!=='edge'):parts;
   const selected=before.surface_role==='top'
     ? topNext.id
     : newSides[oldSides.findIndex(item=>item.id===before.id)]?.id ?? before.id;
-  return {before:all,after:[bottomNext,topNext,...parts],selected};
+  return {before:all,after:[bottomNext,topNext,...visibleParts],selected};
 }
 
 function commitPull(before,after) {
+  if (before.solid_id && before.opening_id && before.surface_role==='side' &&
+      before.shape==='rectangle') {
+    const normal=surfaceNormal(before);
+    const moved=after.x!==before.x || after.y!==before.y || after.z!==before.z;
+    const amount=moved
+      ? dotPoint([after.x-before.x,after.y-before.y,after.z-before.z],normal)
+      : after.height;
+    if (amount>.001) {
+      const clean={...before,solid_id:null,surface_role:null,opening_id:null,opening_origin:null};
+      const extruded={...after,solid_id:null,surface_role:null,opening_id:null,opening_origin:null,
+        height:Math.max(.001,amount)};
+      const shell=shellFromObject(clean,extruded);
+      if (shell) {
+        const planePoint=[before.x,before.y,before.z];
+        const planeOffset=dotPoint(normal,planePoint);
+        const hostPieces=objects().filter(item=>item.id!==before.id &&
+          item.solid_id===before.solid_id && item.surface_role==='side' &&
+          Math.abs(dotPoint(surfaceNormal(item),normal)-1)<1e-4 &&
+          Math.abs(dotPoint(normal,[item.x,item.y,item.z])-planeOffset)<1e-4);
+        const mergedHost=hostPieces.map(item=>({...item,hide_edges:true}));
+        const pieces=shell.pieces
+          .filter(piece=>piece.surface_role!=='edge')
+          .map(piece=>piece.surface_role==='side'||piece.surface_role==='bottom'
+            ? {...piece,hide_edges:true}:piece);
+        return batch([before,...hostPieces],[...pieces,...mergedHost],[shell.top.id]);
+      }
+    }
+  }
   if (before.solid_id && before.opening_id &&
-      ['top','pocket'].includes(before.surface_role)) {
+      ['top','side','pocket'].includes(before.surface_role)) {
     const origin=before.opening_origin??surfaceCenter(before),normal=surfaceNormal(before);
-    const bottom=objects().find(item=>item.solid_id===before.solid_id && item.surface_role==='bottom'
-      && item.shape==='rectangle' &&
-      QreaseeLine.splitRectangle(item,openingProjection(before,item)));
+    const sideOpening=before.surface_role==='side' || (before.surface_role==='pocket' && Boolean(before.wall_axis));
+    const bottom=sideOpening
+      ? objects().find(item=>item.id!==before.id && item.solid_id===before.solid_id &&
+          item.surface_role==='side' && item.shape==='rectangle' &&
+          dotPoint(surfaceNormal(item),normal)<-.999 &&
+          QreaseeLine.splitRectangle(item,openingProjection(before,item)))
+      : objects().find(item=>item.solid_id===before.solid_id && item.surface_role==='bottom'
+          && item.shape==='rectangle' &&
+          QreaseeLine.splitRectangle(item,openingProjection(before,item)));
     const base=surfaceCenter(after);
     const baseOffset=normal.reduce((sum,value,i)=>sum+value*(base[i]-origin[i]),0);
     const target=baseOffset<-.001?base:base.map((value,i)=>value+normal[i]*after.height);
@@ -1542,6 +1593,7 @@ function scene(meshes, objects, projection) {
     const projected = mesh.vertices.map(projection);
     const object = objects[index];
     const smooth = object.surface_role==='side' && object.shape==='circle';
+    const quiet = Boolean(object.hide_edges) || Boolean(object.opening_id) && object.surface_role==='side';
     const entries = mesh.faces.length ? mesh.faces : [[0,1]];
     for (const [entryIndex, face] of entries.entries()) {
       const world=face.map(i=>mesh.vertices[i]);
@@ -1573,7 +1625,7 @@ function scene(meshes, objects, projection) {
       }) : null;
       faces.push({object,points,edges,world:visible,top,tone,cut:mesh.cut,
         depth:points.reduce((sum,p) => sum+p[2],0)/points.length,
-        smooth,key:object.id+':'+index+':'+entryIndex});
+        smooth,quiet,key:object.id+':'+index+':'+entryIndex});
     }
   });
   return orderFaces(faces);
@@ -1765,7 +1817,7 @@ function draw() {
           ctx.lineTo(...face.points[(i+1)%face.points.length].slice(0,2));
         }
       }
-      if (!face.smooth) ctx.stroke();
+      if (!face.smooth && !face.quiet) ctx.stroke();
     }
   } else state.hits = [];
   if (drag?.tool==='select' && drag.current) {
@@ -2825,7 +2877,7 @@ function drawSheet() {
         drawing.append(svg(face.points.length===2?'polyline':'polygon',{
           points:face.points.map(([px,py])=>round(px)+','+round(py)).join(' '),
           fill:face.points.length===2?'none':mode==='iso'?shade(face.object.color,face.tone):face.cut?'#626c73':'#f6f5f0',
-          stroke:face.smooth?'none':face.edges?'none':'#2e3941','stroke-width':.24,'stroke-linejoin':'round'
+          stroke:face.smooth||face.quiet?'none':face.edges?'none':'#2e3941','stroke-width':.24,'stroke-linejoin':'round'
         }));
         face.edges?.forEach((edge,i)=>{
           if (!edge) return;

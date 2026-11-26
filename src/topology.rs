@@ -331,6 +331,7 @@ fn new_face(region: &Loop) -> Option<Object> {
         surface_role: None,
         opening_id: None,
         opening_origin: None,
+        hide_edges: false,
     };
     object.valid().then_some(object)
 }
@@ -464,6 +465,7 @@ mod tests {
             surface_role: None,
             opening_id: None,
             opening_origin: None,
+            hide_edges: false,
         }
     }
 

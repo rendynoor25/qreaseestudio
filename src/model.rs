@@ -74,6 +74,12 @@ pub struct Object {
     pub opening_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opening_origin: Option<Point>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hide_edges: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Serialize)]
@@ -642,6 +648,7 @@ pub fn demo() -> Document {
             surface_role: None,
             opening_id: None,
             opening_origin: None,
+            hide_edges: false,
         });
     };
     block("Pelat dasar", [0., 0., 0., 13., 8., 0.28], "#c1b5a2");

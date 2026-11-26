@@ -43,6 +43,7 @@ interface QreaseeObject {
   surface_role?: 'top' | 'bottom' | 'side' | 'edge' | 'pocket' | null;
   opening_id?: string | null;
   opening_origin?: QreaseePoint | null;
+  hide_edges?: boolean;
 }
 
 interface QreaseeSheet {
@@ -150,6 +151,7 @@ interface QreaseeHit {
   cut: boolean;
   depth: number;
   smooth: boolean;
+  quiet: boolean;
   key: string;
 }
 
