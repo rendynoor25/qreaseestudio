@@ -51,7 +51,7 @@ document.querySelectorAll('[data-icon]').forEach(
 
 /** @type {Record<QreaseeTool, [string, string, string]>} */
 const tools = {
-  select: ['Pilih', 'V', 'Klik objek untuk memilih'],
+  select: ['Pilih', 'V', 'Tarik kiri ke kanan untuk memuat seluruh objek; kanan ke kiri untuk yang tersentuh. Klik tiga kali untuk objek terhubung'],
   line: ['Garis', 'L', 'Klik titik awal, lalu klik titik berikutnya; ketik panjang untuk ukuran tepat'],
   arc: ['Busur', 'A', 'Tarik titik awal ke titik akhir, lalu klik untuk menentukan lengkung busur'],
   offset: ['Offset', 'I', 'Tarik dari bidang persegi atau lingkaran untuk membuat kontur sejajar'],
@@ -785,6 +785,43 @@ function select(id, additive=false) {
   refresh();
 }
 
+/** @param {QreaseePoint2} start @param {QreaseePoint2} end */
+function selectBox(start,end,additive=false) {
+  const box={left:Math.min(start[0],end[0]),top:Math.min(start[1],end[1]),
+    right:Math.max(start[0],end[0]),bottom:Math.max(start[1],end[1])};
+  const crossing=end[0]<start[0];
+  const parts=new Map();
+  for (const face of state.hits) {
+    const id=targetId(face.object);
+    if (!id) continue;
+    if (!parts.has(id)) parts.set(id,[]);
+    parts.get(id).push(face.points);
+  }
+  const selected=additive?new Set(state.selected):new Set();
+  for (const [id,faces] of parts) {
+    if (crossing
+      ? faces.some(points=>QreaseeLine.boxHitsGeometry(points,box,true))
+      : faces.every(points=>QreaseeLine.boxHitsGeometry(points,box,false))) selected.add(id);
+  }
+  state.selected=selected;
+  refresh();
+  showStatus(selected.size+' objek dipilih ('+(crossing?'bersinggungan':'di dalam kotak')+').');
+}
+
+/** @param {QreaseeObject} object @param {boolean} additive */
+function selectConnected(object,additive=false) {
+  if (targetId(object)!==object.id) {select(targetId(object),additive);return;}
+  const eligible=objects().map((item,index)=>({object:item,mesh:state.meshes[index]}))
+    .filter(entry=>entry.mesh && targetId(entry.object)===entry.object.id &&
+      (entry.object.container?.id??null)===(object.container?.id??null));
+  const ids=object.shape==='line'
+    ? QreaseeLine.connectedLines(object.id,eligible.map(entry=>entry.object))
+    : QreaseeLine.connectedFaces(object.id,eligible);
+  state.selected=additive?new Set([...state.selected,...ids]):new Set(ids);
+  refresh();
+  showStatus(ids.length+' objek terhubung dipilih.');
+}
+
 function removeObject() {
   const object = currentObject();
   if (object) { edit(object, null); return; }
@@ -1332,6 +1369,19 @@ function draw() {
       ctx.stroke();
     }
   } else state.hits = [];
+  if (drag?.tool==='select' && drag.current) {
+    const left=Math.min(drag.start[0],drag.current[0]), top=Math.min(drag.start[1],drag.current[1]);
+    const width=Math.abs(drag.current[0]-drag.start[0]), height=Math.abs(drag.current[1]-drag.start[1]);
+    const crossing=drag.current[0]<drag.start[0];
+    ctx.fillStyle=crossing?'#3677c522':'#168a6522';
+    ctx.fillRect(left,top,width,height);
+    ctx.save();
+    ctx.setLineDash(crossing?[5,4]:[]);
+    ctx.strokeStyle=crossing?'#3677c5':'#168a65';
+    ctx.lineWidth=1.3;
+    ctx.strokeRect(left,top,width,height);
+    ctx.restore();
+  }
   if (drag?.preview) {
     const mesh = previewMesh(drag.preview);
     polygon(mesh.vertices.map(stagePoint));
@@ -1687,7 +1737,14 @@ canvas.addEventListener('pointerdown',event=>{
   } else {
     if (!state.doc || state.busy) return;
     const face=pickFace(start,tool!=='pull');
-    if (tool==='select') { select(targetId(face?.object),event.shiftKey); return; }
+    if (tool==='select') {
+      if (face) select(targetId(face.object),event.shiftKey);
+      else {
+        state.drag={tool:'select',start,current:start,additive:event.shiftKey};
+        canvas.setPointerCapture(event.pointerId);
+      }
+      return;
+    }
     const object=face?.object;
     if (tool==='erase') {
       if (object) { select(targetId(object)); removeObject(); }
@@ -1821,6 +1878,11 @@ canvas.addEventListener('pointermove',event=>{
     redraw();
     return;
   }
+  if (drag.tool==='select') {
+    drag.current=point;
+    redraw();
+    return;
+  }
   state.inference=null;
   const dx=point[0]-drag.start[0], dy=point[1]-drag.start[1];
   if (drag.tool==='orbit') {
@@ -1930,6 +1992,12 @@ canvas.addEventListener('dblclick',event=>{
   if (face?.object.container) enterContainer(face.object.container.id);
 });
 
+canvas.addEventListener('click',event=>{
+  if (event.detail!==3 || state.tool!=='select' || state.layout || !state.doc) return;
+  const face=pickFace(pointer(event),true);
+  if (face) selectConnected(face.object,event.shiftKey);
+});
+
 canvas.addEventListener('pointerup',()=>{
   const drag=state.drag;
   state.drag=null;
@@ -1942,7 +2010,11 @@ canvas.addEventListener('pointerup',()=>{
     return;
   }
   state.linePress=null;
-  if (drag?.tool==='arc' && drag.end && Math.hypot(drag.end[0]-drag.initial[0],drag.end[1]-drag.initial[1])>.001) {
+  if (drag?.tool==='select') {
+    if (Math.hypot(drag.current[0]-drag.start[0],drag.current[1]-drag.start[1])>=4)
+      selectBox(drag.start,drag.current,drag.additive);
+    else if (!drag.additive) select(null);
+  } else if (drag?.tool==='arc' && drag.end && Math.hypot(drag.end[0]-drag.initial[0],drag.end[1]-drag.initial[1])>.001) {
     state.arcPending={a:drag.initial,b:drag.end,preview:[drag.initial,drag.end]};
   } else if (drag?.tool==='offset' && drag.contour) {
     addLineChain(drag.contour,true,'Kontur offset');
