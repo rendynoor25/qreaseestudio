@@ -58,7 +58,7 @@ const tools = {
   rectangle: ['Persegi panjang', 'R', 'Klik awal, ketik X × Y, lalu klik arah pada bidang horizontal atau vertikal'],
   circle: ['Lingkaran', 'C', 'Klik pusat, ketik radius, lalu klik arah'],
   pull: ['Push/Pull', 'P', 'Klik bidang, ketik jarak, lalu klik arah atas atau bawah'],
-  move: ['Pindah', 'M', 'Pilih objek, klik titik awal, lalu klik titik tujuan; snap tersedia'],
+  move: ['Pindah', 'M', 'Pilih objek, klik titik awal, lalu klik titik tujuan; snap 3D dan sumbu Z dengan panah Atas/Bawah'],
   rotate: ['Rotate', '', 'Klik pusat rotasi, lalu tentukan sudut; ketik angka lalu Enter untuk presisi'],
   scale: ['Skala', 'S', 'Tarik dari objek untuk mengubah ukurannya secara proporsional'],
   erase: ['Penghapus', 'E', 'Klik objek untuk menghapus; Ctrl+Z untuk mengurungkan'],
@@ -1013,8 +1013,43 @@ function moveSources() {
 
 function movePreview(sources,start,destination) {
   if (!destination) return null;
-  const dx=destination[0]-start[0],dy=destination[1]-start[1];
-  return sources.map(object=>({...object,x:object.x+dx,y:object.y+dy}));
+  const dx=destination[0]-start[0],dy=destination[1]-start[1],dz=destination[2]-start[2];
+  return sources.map(object=>({...object,x:object.x+dx,y:object.y+dy,z:object.z+dz}));
+}
+
+/**
+ * Resolve a destination while movement is locked to the vertical axis.
+ * The cursor is projected onto the screen-space direction of +Z, then the
+ * height is solved so perspective foreshortening does not distort the drag.
+ * @param {QreaseePoint2} point
+ * @param {{start: QreaseePoint}} pending
+ * @returns {QreaseeInference|null}
+ */
+function verticalMoveDestination(point,pending) {
+  const base=stagePoint(pending.start);
+  const step=stagePoint([pending.start[0],pending.start[1],pending.start[2]+1]);
+  const dx=step[0]-base[0],dy=step[1]-base[1],length2=dx*dx+dy*dy;
+  if (!Number.isFinite(base[0]) || length2<16) return null;
+  const target=((point[0]-base[0])*dx+(point[1]-base[1])*dy)/length2;
+  const measure=value=>{
+    const projected=stagePoint([pending.start[0],pending.start[1],pending.start[2]+value]);
+    if (!Number.isFinite(projected[0])) return NaN;
+    return ((projected[0]-base[0])*dx+(projected[1]-base[1])*dy)/length2;
+  };
+  let distance=target;
+  for (let i=0;i<6;i++) {
+    const current=measure(distance);
+    const slope=(measure(distance+.01)-current)/.01;
+    if (!Number.isFinite(current)||!Number.isFinite(slope)||Math.abs(slope)<1e-6) break;
+    const next=distance+(target-current)/slope;
+    if (!Number.isFinite(next)) break;
+    if (Math.abs(next-distance)<1e-4) {distance=next;break;}
+    distance=next;
+  }
+  distance=clamp(distance,-20000,20000);
+  distance=state.snapping?snap(distance):round(distance);
+  return {world:/** @type {QreaseePoint} */ ([pending.start[0],pending.start[1],pending.start[2]+distance]),
+    label:'Sumbu Z'};
 }
 
 /** @param {QreaseePoint2} point @param {Set<string>} seen */
@@ -1047,11 +1082,16 @@ function eraseLineTargets(ids) {
   return [...targets.values()];
 }
 
-/** @param {QreaseePoint2} point @param {{z: number, excluded: Set<string>}} pending @returns {QreaseeInference|null} */
+/** @param {QreaseePoint2} point @param {{z: number, axis?: string|null, excluded: Set<string>, start: QreaseePoint}} pending @returns {QreaseeInference|null} */
 function moveDestination(point,pending) {
-  return infer(point,pending.z,pending.excluded)
-    || infer(point,undefined,pending.excluded)
-    || drawingPoint(point,pending.z,pending.excluded);
+  if (pending.axis==='z') return verticalMoveDestination(point,pending);
+  const snapped=infer(point,undefined,pending.excluded);
+  if (snapped) return snapped;
+  const face=pickFace(point,false);
+  const elevation=face?.object && !pending.excluded.has(face.object.id) &&
+    face.world.length && face.world.every(vertex=>Math.abs(vertex[2]-face.world[0][2])<.00001)
+    ? face.world[0][2] : pending.z;
+  return drawingPoint(point,elevation,pending.excluded);
 }
 
 const normalizeAngle = value => ((value+180)%360+360)%360-180;
@@ -2903,14 +2943,17 @@ canvas.addEventListener('pointerdown',event=>{
         const pending=state.movePending;
         const destination=moveDestination(start,pending);
         if (!destination) {showStatus('Arahkan klik tujuan pada bidang yang terlihat.');return;}
-        const dx=destination.world[0]-pending.start[0],dy=destination.world[1]-pending.start[1];
-        if (Math.hypot(dx,dy)<.001) {showStatus('Titik tujuan masih sama dengan titik awal.');return;}
+        const dx=destination.world[0]-pending.start[0],dy=destination.world[1]-pending.start[1],
+          dz=destination.world[2]-pending.start[2];
+        if (Math.hypot(dx,dy,dz)<.001) {showStatus('Titik tujuan masih sama dengan titik awal.');return;}
         const updates=movePreview(pending.sources,pending.start,destination.world);
         const selection=[...state.selected];
+        const lifted=Math.abs(dz)>=.001;
         state.movePending=null;
         state.inference=null;
         batch(pending.sources,updates,selection).then(moved=>{
-          if (moved) showStatus(pending.sources.length+' objek dipindahkan.');
+          if (moved) showStatus(pending.sources.length+' objek dipindahkan'+
+            (lifted?' (ΔZ '+lengthLabel(dz)+').':'.'));
         });
         redraw();
         return;
@@ -2919,10 +2962,11 @@ canvas.addEventListener('pointerdown',event=>{
       if (!sources.length) {showStatus('Pilih objek terlebih dahulu, lalu tentukan titik awal.');return;}
       const hit=infer(start,undefined) || drawingPoint(start);
       if (!hit) {showStatus('Tentukan titik awal pada bidang yang terlihat.');return;}
-      state.movePending={start:hit.world,z:hit.world[2],sources,
+      state.movePending={start:hit.world,z:hit.world[2],sources,axis:null,pointer:start,
         excluded:new Set(sources.map(object=>object.id)),destination:null,updates:null};
       state.inference=hit.label?hit:null;
-      showStatus('Klik titik tujuan untuk memindahkan '+sources.length+' objek.');
+      showStatus('Klik titik tujuan untuk memindahkan '+sources.length+
+        ' objek; tekan panah Atas/Bawah untuk mengunci sumbu Z.');
       redraw();
       return;
     }
@@ -3056,10 +3100,19 @@ canvas.addEventListener('pointermove',event=>{
   if (!drag) {
     if (state.movePending) {
       const pending=state.movePending;
+      pending.pointer=point;
       const destination=moveDestination(point,pending);
       pending.destination=destination?.world||null;
       pending.updates=destination?movePreview(pending.sources,pending.start,destination.world):null;
       state.inference=destination?.label?destination:null;
+      if (destination) {
+        const dz=destination.world[2]-pending.start[2];
+        showStatus(pending.axis==='z'
+          ? 'Sumbu Z terkunci · ΔZ '+lengthLabel(dz)+' · klik kedua untuk menetapkan'
+          : 'Pindah · ΔZ '+lengthLabel(dz)+(destination.label?' · '+destination.label:''));
+      } else if (pending.axis==='z') {
+        showStatus('Sumbu Z tidak terlihat pada arah kamera ini. Putar tampilan atau tekan panah lagi.');
+      }
       redraw();
       return;
     }
@@ -3337,6 +3390,26 @@ window.addEventListener('keydown',event=>{
   if (dialog || typing) return;
   const key=event.key.toUpperCase();
   const buttonFocus=['BUTTON','SUMMARY'].includes(target.tagName);
+  if (state.movePending && (event.key==='ArrowUp' || event.key==='ArrowDown')) {
+    event.preventDefault();
+    const pending=state.movePending;
+    pending.axis=pending.axis==='z'?null:'z';
+    const destination=pending.pointer?moveDestination(pending.pointer,pending):null;
+    pending.destination=destination?.world||null;
+    pending.updates=destination?movePreview(pending.sources,pending.start,destination.world):null;
+    state.inference=destination?.label?destination:null;
+    if (pending.axis==='z' && destination) {
+      showStatus('Sumbu Z terkunci · ΔZ '+lengthLabel(destination.world[2]-pending.start[2])+
+        ' · klik kedua untuk menetapkan');
+    } else if (pending.axis==='z') {
+      pending.axis=null;
+      showStatus('Sumbu Z tidak terlihat pada arah kamera ini. Putar tampilan lalu coba lagi.');
+    } else {
+      showStatus('Gerak bebas pada bidang dan snap 3D. Tekan panah lagi untuk sumbu Z.');
+    }
+    redraw();
+    return;
+  }
   if (key==='DELETE' || key==='BACKSPACE') {
     if (state.layout || event.ctrlKey || event.metaKey || event.altKey) return;
     event.preventDefault();
