@@ -640,7 +640,10 @@ async function openRoom(createBlank) {
     history.replaceState(null, '', '#' + id);
     await sync();
     if (!state.doc) throw new Error('Proyek tidak dapat dibuka. Periksa koneksi atau tautannya.');
-    if (state.doc) document.body.classList.remove('landing');
+    if (state.doc) {
+      document.body.classList.remove('landing');
+      requestAnimationFrame(()=>{ if (state.epoch===epoch) fit(); });
+    }
   } catch (error) {
     if (state.epoch === epoch) {
       connection(false, 'Terputus');
