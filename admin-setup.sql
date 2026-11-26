@@ -104,25 +104,20 @@ begin
     'users_30d', (select count(*) from auth.users
       where created_at >= now() - interval '30 days'),
     'admins', (select count(*) from public.qreasee_admins),
-    'projects', (select count(*) from rooms),
-    'objects', (select coalesce(sum(objects), 0) from rooms),
-    'comments', (select coalesce(sum(comments), 0) from rooms),
-    'sections', (select coalesce(sum(sections), 0) from rooms),
-    'bytes', (select coalesce(sum(bytes), 0) from rooms),
-    'projects_today', (select count(*) from rooms
-      where created_at >= date_trunc('day', now())),
-    'projects_7d', (select count(*) from rooms
-      where created_at >= now() - interval '7 days'),
-    'projects_30d', (select count(*) from rooms
-      where created_at >= now() - interval '30 days'),
-    'active_24h', (select count(*) from rooms
-      where updated_at >= now() - interval '24 hours'),
-    'active_7d', (select count(*) from rooms
-      where updated_at >= now() - interval '7 days'),
-    'comments_7d', (select count(*) from rooms r
+    'projects', r.projects,
+    'objects', r.objects,
+    'comments', r.comments,
+    'sections', r.sections,
+    'bytes', r.bytes,
+    'projects_today', r.projects_today,
+    'projects_7d', r.projects_7d,
+    'projects_30d', r.projects_30d,
+    'active_24h', r.active_24h,
+    'active_7d', r.active_7d,
+    'comments_7d', (select count(*) from public.qreasee_rooms room
       cross join lateral jsonb_array_elements(
-        case when jsonb_typeof(r.document->'comments') = 'array'
-             then r.document->'comments' else '[]'::jsonb end) c
+        case when jsonb_typeof(room.document->'comments') = 'array'
+             then room.document->'comments' else '[]'::jsonb end) c
       where (c->>'created_at') ~ '^[0-9]+$'
         and (c->>'created_at')::bigint >=
           (extract(epoch from now()) - 604800) * 1000),
@@ -130,35 +125,37 @@ begin
       where seen_at >= now() - interval '2 minutes'),
     'online_rooms', (select count(distinct room_id) from public.qreasee_peers
       where seen_at >= now() - interval '2 minutes'),
-    'avg_objects', (select case when count(*) = 0 then 0
-      else round(avg(objects)::numeric, 1) end from rooms),
-    'largest_bytes', (select coalesce(max(bytes), 0) from rooms),
-    'empty_projects', (select count(*) from rooms where objects = 0),
-    'role_edit', (select count(*) from rooms where share_role = 'edit'),
-    'role_comment', (select count(*) from rooms where share_role = 'comment'),
-    'role_view', (select count(*) from rooms where share_role = 'view')
+    'avg_objects', case when r.projects = 0 then 0
+      else round(r.objects::numeric / r.projects, 1) end,
+    'largest_bytes', r.largest_bytes,
+    'empty_projects', r.empty_projects,
+    'role_edit', r.role_edit,
+    'role_comment', r.role_comment,
+    'role_view', r.role_view
   ) into v_totals
   from (
-    select r.id,
-           r.owner,
-           r.created_at,
-           r.updated_at,
-           r.document,
-           case when jsonb_typeof(r.document->'objects') = 'array'
-                then jsonb_array_length(r.document->'objects') else 0 end as objects,
-           case when jsonb_typeof(r.document->'comments') = 'array'
-                then jsonb_array_length(r.document->'comments') else 0 end as comments,
-           case when jsonb_typeof(r.document->'sections') = 'array'
-                then jsonb_array_length(r.document->'sections') else 0 end as sections,
-           octet_length(r.document::text) as bytes,
-           coalesce(r.document->'share'->>'role', 'edit') as share_role,
-           coalesce(
-             nullif(r.document->'sheet'->>'title', ''),
-             nullif(r.document->>'title', ''),
-             'Proyek tanpa judul') as title
-    from public.qreasee_rooms r
-  ) rooms
-  limit 1;
+    select
+      count(*) as projects,
+      coalesce(sum(case when jsonb_typeof(document->'objects') = 'array'
+        then jsonb_array_length(document->'objects') else 0 end), 0) as objects,
+      coalesce(sum(case when jsonb_typeof(document->'comments') = 'array'
+        then jsonb_array_length(document->'comments') else 0 end), 0) as comments,
+      coalesce(sum(case when jsonb_typeof(document->'sections') = 'array'
+        then jsonb_array_length(document->'sections') else 0 end), 0) as sections,
+      coalesce(sum(octet_length(document::text)), 0) as bytes,
+      coalesce(max(octet_length(document::text)), 0) as largest_bytes,
+      count(*) filter (where created_at >= date_trunc('day', now())) as projects_today,
+      count(*) filter (where created_at >= now() - interval '7 days') as projects_7d,
+      count(*) filter (where created_at >= now() - interval '30 days') as projects_30d,
+      count(*) filter (where updated_at >= now() - interval '24 hours') as active_24h,
+      count(*) filter (where updated_at >= now() - interval '7 days') as active_7d,
+      count(*) filter (where case when jsonb_typeof(document->'objects') = 'array'
+        then jsonb_array_length(document->'objects') else 0 end = 0) as empty_projects,
+      count(*) filter (where coalesce(document->'share'->>'role', 'edit') = 'edit') as role_edit,
+      count(*) filter (where coalesce(document->'share'->>'role', 'edit') = 'comment') as role_comment,
+      count(*) filter (where coalesce(document->'share'->>'role', 'edit') = 'view') as role_view
+    from public.qreasee_rooms
+  ) r;
 
   select jsonb_agg(jsonb_build_object(
     'date', d.day,
