@@ -129,6 +129,29 @@ function demoApply(document, edit) {
       document.comments=comments.filter(comment=>comment.id!==before.id &&
         comment.parent!==before.id);
     }
+  } else if (edit.type === 'section') {
+    const sections=document.sections || [];
+    const before=edit.before || null;
+    const after=edit.after || null;
+    if (after) {
+      if (!after.id || !after.name || !Array.isArray(after.origin) ||
+          !Array.isArray(after.normal)) return 'Bidang potong tidak valid.';
+      if (before) {
+        const index=sections.findIndex(section=>section.id===before.id);
+        if (index<0 || JSON.stringify(sections[index])!==JSON.stringify(before)) return 'conflict';
+        sections[index]=demoCopy(after);
+      } else {
+        if (sections.some(section=>section.id===after.id)) return 'conflict';
+        if (sections.length>=12) return 'Batas demo adalah 12 bidang potong.';
+        sections.push(demoCopy(after));
+      }
+    } else {
+      if (!before) return 'Bidang potong tidak valid.';
+      const index=sections.findIndex(section=>section.id===before.id);
+      if (index<0 || JSON.stringify(sections[index])!==JSON.stringify(before)) return 'conflict';
+      sections.splice(index,1);
+    }
+    document.sections=sections;
   } else return 'Perintah tidak dikenal.';
   document.revision += 1;
   return null;
@@ -140,6 +163,7 @@ window.qreaseeDemoPost = async (url, request) => {
     if (request.blank) {
       document.objects = [];
       document.comments = [];
+      document.sections = [];
       document.share = {role:'edit'};
       document.sheet.title = 'Proyek tanpa judul';
     }

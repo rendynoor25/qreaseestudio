@@ -40,6 +40,7 @@ const icons = {
   erase:'<path d="m3 15 9-10a2 2 0 0 1 3 0l6 6a2 2 0 0 1 0 3l-7 7H8zM9 21h12"/>',
   measure:'<path d="M3 17 17 3l4 4L7 21zM9 11l2 2m1-5 2 2m1-5 2 2"/>',
   comment:'<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8m-8 4h5"/>',
+  section:'<path d="M3 5h18v14H3z"/><path d="m4 17 16-10" stroke-dasharray="3 2"/>',
   orbit:'<ellipse cx="12" cy="12" rx="9" ry="5.5" transform="rotate(-28 12 12)"/><path d="M8 4a8 8 0 0 1 12 5m-2-4 2 4 2-4M10 20a8 8 0 0 1-6-5"/>',
   pan:'<path d="M8 13V6a1.5 1.5 0 0 1 3 0v5-7a1.5 1.5 0 0 1 3 0v7-5a1.5 1.5 0 0 1 3 0v6-3a1.5 1.5 0 0 1 3 0v6c0 4-2 6-6 6h-2a5 5 0 0 1-4-2l-4-5a1.6 1.6 0 0 1 2.5-2z"/>',
   download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/>'
@@ -64,6 +65,7 @@ const tools = {
   scale: ['Skala', 'S', 'Tarik dari objek untuk mengubah ukurannya secara proporsional'],
   erase: ['Penghapus', 'E', 'Klik objek untuk menghapus; Ctrl+Z untuk mengurungkan'],
   measure: ['Ukur', 'T', 'Klik titik awal, lalu gerakkan kursor untuk membaca jarak sampai titik akhir'],
+  section: ['Bidang potong', 'X', 'Klik bidang untuk menempatkan potongan; geser sepanjang normal lalu klik lagi'],
   orbit: ['Orbit', 'O', 'Tarik untuk memutar kamera'],
   pan: ['Geser kamera', 'H', 'Tarik untuk menggeser kamera']
 };
@@ -83,7 +85,7 @@ const state = {
   doc: null, meshes: [], plans: [], selected: new Set(), inside: null, tool: 'select', layout: false, busy: false,
   snapping: true, inference: null,
   undo: [], redo: [], drag: null, arcPending:null, linePending:null, linePress:null, drawPending:null,
-  movePending:null, rotatePending:null, offsetPending:null, measurePending:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null, canManageShare:true, shareRole:'edit'
+  movePending:null, rotatePending:null, offsetPending:null, measurePending:null, sectionPending:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null, canManageShare:true, shareRole:'edit'
 };
 const canvas = $('#viewport');
 const ctx = canvas.getContext('2d');
@@ -116,6 +118,22 @@ const perspectiveFov = 35*Math.PI/180;
 const nearPlane = .01;
 const unitFactors = {m:1,cm:100,mm:1000};
 let displayUnit = unitFactors[localStorage.getItem('qreasee-unit')] ? localStorage.getItem('qreasee-unit') : 'm';
+/** @type {{id: QreaseeMaterial, name: string, color: string, pattern: string}[]} */
+const materialPresets = [
+  {id:'brick',name:'Bata merah',color:'#a9553f',pattern:'brick'},
+  {id:'hebel',name:'Hebel / AAC',color:'#d8d4c7',pattern:'block'},
+  {id:'timber',name:'Kayu',color:'#a77643',pattern:'timber'},
+  {id:'zinc',name:'Seng',color:'#9aa3a7',pattern:'zinc'},
+  {id:'clay_tile',name:'Genteng tanah liat',color:'#b5502f',pattern:'tile'},
+  {id:'concrete_tile',name:'Genteng beton',color:'#777b7e',pattern:'tile'},
+  {id:'glass',name:'Kaca',color:'#b7d7e2',pattern:'glass'},
+  {id:'grass',name:'Rumput',color:'#6e8e4b',pattern:'grass'},
+  {id:'sand',name:'Pasir',color:'#d7c28e',pattern:'sand'},
+  {id:'asphalt',name:'Aspal',color:'#4d5154',pattern:'asphalt'},
+  {id:'metal',name:'Logam',color:'#959da3',pattern:'metal'},
+  {id:'paint',name:'Cat dasar',color:'#d7d9db',pattern:'paint'}
+];
+const materialById = new Map(materialPresets.map(material=>[material.id,material]));
 /** @type {Record<QreaseeView, QreaseePoint2>} */
 const views = { perspective:[.62,.48], iso:[.62,.54], plan:[0,Math.PI/2], front:[0,0], right:[Math.PI/2,0] };
 const clamp = (value,min,max) => Math.max(min,Math.min(max,value));
@@ -177,6 +195,7 @@ function setTool(tool) {
     state.rotatePending=null;
     state.offsetPending=null;
     state.measurePending=null;
+    state.sectionPending=null;
     state.hoverKey=null;
     if (state.cursor) delete state.cursor.line;
     $('#line-length').value='';
@@ -487,6 +506,7 @@ document.querySelectorAll('.unit-label').forEach(label=>label.textContent=displa
 $('#line-unit').textContent=displayUnit;
 
 function mode(layout) {
+  if (!layout && typeof exitLayoutView==='function') exitLayoutView();
   state.layout = layout;
   state.cursor = null;
   state.hoverKey = null;
@@ -625,10 +645,13 @@ async function openRoom(createBlank) {
   state.rotatePending = null;
   state.offsetPending = null;
   state.measurePending = null;
+  state.sectionPending = null;
   activeCommentTarget=null;
+  activeSectionId=null;
   closeCommentComposer();
   hideObjectMenu();
   toggleComments(false);
+  toggleSections(false);
   $('#line-length-control').hidden=state.layout || !['line','rectangle','circle','arc','pull','rotate','offset'].includes(state.tool);
   $('#line-length').value='';
   state.undo = [];
@@ -891,6 +914,7 @@ function refreshButtons() {
   $('#comment-send').disabled=state.busy || !comment;
   $('#comment-text').disabled=!comment;
   $('#object-menu-comment').disabled=!comment;
+  $('#section-add').disabled=state.busy || !editable;
 }
 
 function refresh(force = false) {
@@ -944,6 +968,7 @@ function refresh(force = false) {
       element.disabled=!editable;
     });
   } else objectBaseline = null;
+  renderMaterials();
   const sheetForm = $('#sheet-form');
   if (doc && (force || sheetForm.dataset.dirty !== 'yes')) {
     for (const key of ['room_title','drawn_by','checked_by','issue_date']) sheetForm.elements.namedItem(key).value=doc.sheet[key] || '';
@@ -961,6 +986,7 @@ function refresh(force = false) {
   });
   applyAccessUi();
   renderComments();
+  renderSections();
   if (state.layout) drawSheet();
   else redraw();
 }
@@ -1031,6 +1057,443 @@ async function changeShareRole(role) {
   const saved=await commit({type:'share',before,after:{role}});
   if (saved) showStatus('Akses tautan: '+shareRoleLabel(role)+'.');
   else renderShareDialog();
+}
+
+/** @returns {QreaseeObject[]} */
+function materialTargets() {
+  const group=members(onlySelected());
+  if (group.length) return group.filter(object=>object.shape!=='line');
+  const object=currentObject();
+  return object && object.shape!=='line' ? [object] : [];
+}
+
+function renderMaterials() {
+  const panel=$('#material-panel');
+  const targets=materialTargets();
+  if (!targets.length) {panel.hidden=true;return;}
+  panel.hidden=false;
+  const materials=targets.map(object=>object.material || '');
+  const current=materials.every(value=>value===materials[0])?materials[0]:'__mixed__';
+  $('#material-current').textContent=current==='__mixed__'?'Campuran':
+    current?materialById.get(current)?.name||'Kustom':'Tanpa material';
+  const grid=$('#material-grid');
+  grid.replaceChildren();
+  const addOption=(id,name,color,pattern)=>{
+    const option=document.createElement('button');
+    option.type='button';
+    option.className='material-option'+(id?current===id?' active':'':
+      current===''?' active':'')+(id?'':' none');
+    option.disabled=!canEditModel();
+    option.title=name;
+    const swatch=document.createElement('span');swatch.className='material-swatch';
+    if (color) swatch.style.setProperty('--swatch',color);
+    if (pattern) swatch.dataset.pattern=pattern;
+    const label=document.createElement('span');label.textContent=name;
+    option.append(swatch,label);
+    option.onclick=()=>applyMaterial(id);
+    grid.append(option);
+  };
+  addOption(null,'Tanpa material',null,'');
+  for (const preset of materialPresets)
+    addOption(preset.id,preset.name,preset.color,preset.pattern);
+}
+
+/** @param {QreaseeMaterial|null} id */
+async function applyMaterial(id) {
+  if (!canEditModel()) {showStatus('Akses ini tidak dapat mengubah model.');return;}
+  const targets=materialTargets();
+  if (!targets.length) return;
+  const preset=id?materialById.get(id):null;
+  if (id && !preset) return;
+  const after=targets.map(object=>({...object,
+    material:preset?preset.id:null,
+    ...(preset?{color:preset.color}:{})}));
+  const saved=await batch(targets,after,[...state.selected]);
+  if (saved) showStatus(preset?'Material '+preset.name+' diterapkan.':'Material dihapus.');
+}
+
+const sectionPlanes = () => state.doc?.sections || [];
+const activeSections = () => sectionPlanes().filter(section=>section.enabled!==false);
+/** @type {string|null} */
+let activeSectionId = null;
+
+/** @param {QreaseePoint} value @returns {QreaseePoint} */
+function normalizePoint(value) {
+  const length=Math.hypot(value[0],value[1],value[2]);
+  if (length<1e-9) return [0,0,1];
+  return [value[0]/length,value[1]/length,value[2]/length];
+}
+
+/** @param {QreaseePoint[]} world @returns {QreaseePoint|null} */
+function faceNormal(world) {
+  if (world.length<3) return null;
+  const origin=world[0];
+  for (let i=1;i<world.length-1;i++) {
+    const a=world[i].map((value,index)=>value-origin[index]);
+    const b=world[i+1].map((value,index)=>value-origin[index]);
+    const normal=[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+    if (Math.hypot(...normal)>1e-8) return normalizePoint(/** @type {QreaseePoint} */ (normal));
+  }
+  return null;
+}
+
+/** @param {QreaseeSectionPlane} section */
+function sectionBasis(section) {
+  const normal=normalizePoint(section.normal);
+  const helper=Math.abs(normal[0])<.8?[1,0,0]:[0,1,0];
+  const u=normalizePoint(/** @type {QreaseePoint} */ ([
+    normal[1]*helper[2]-normal[2]*helper[1],
+    normal[2]*helper[0]-normal[0]*helper[2],
+    normal[0]*helper[1]-normal[1]*helper[0]
+  ]));
+  const v=normalizePoint(/** @type {QreaseePoint} */ ([
+    normal[1]*u[2]-normal[2]*u[1],
+    normal[2]*u[0]-normal[0]*u[2],
+    normal[0]*u[1]-normal[1]*u[0]
+  ]));
+  return {normal,u,v};
+}
+
+/** @param {QreaseeSectionPlane} section */
+function sectionQuad(section) {
+  const {normal,u,v}=sectionBasis(section);
+  let min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];
+  for (const mesh of state.meshes) for (const vertex of mesh.vertices) {
+    for (let i=0;i<3;i++) {min[i]=Math.min(min[i],vertex[i]);max[i]=Math.max(max[i],vertex[i]);}
+  }
+  if (!Number.isFinite(min[0])) {min=[-3,-3,-3];max=[3,3,3];}
+  const center=min.map((value,index)=>(value+max[index])/2);
+  const delta=center.map((value,index)=>value-section.origin[index]);
+  const along=delta[0]*normal[0]+delta[1]*normal[1]+delta[2]*normal[2];
+  const planeCenter=center.map((value,index)=>value-normal[index]*along);
+  let halfU=1,halfV=1;
+  for (const mesh of state.meshes) for (const vertex of mesh.vertices) {
+    const dx=vertex[0]-planeCenter[0],dy=vertex[1]-planeCenter[1],dz=vertex[2]-planeCenter[2];
+    halfU=Math.max(halfU,Math.abs(dx*u[0]+dy*u[1]+dz*u[2]));
+    halfV=Math.max(halfV,Math.abs(dx*v[0]+dy*v[1]+dz*v[2]));
+  }
+  halfU=clamp(halfU+1,2,80);
+  halfV=clamp(halfV+1,2,80);
+  return [[-1,-1],[1,-1],[1,1],[-1,1]].map(([a,b])=>
+    /** @type {QreaseePoint} */ ([
+      planeCenter[0]+u[0]*a*halfU+v[0]*b*halfV,
+      planeCenter[1]+u[1]*a*halfU+v[1]*b*halfV,
+      planeCenter[2]+u[2]*a*halfU+v[2]*b*halfV
+    ]));
+}
+
+/** @param {QreaseePoint[]} world @param {QreaseeSectionPlane} section @returns {QreaseePoint[]} */
+function clipSectionPolygon(world,section) {
+  const {normal}=sectionBasis(section);
+  const origin=section.origin;
+  const values=world.map(point=>normal[0]*(point[0]-origin[0])+
+    normal[1]*(point[1]-origin[1])+normal[2]*(point[2]-origin[2]));
+  const epsilon=1e-6;
+  if (values.every(value=>value<=epsilon)) return world;
+  const output=[];
+  const crossing=(a,b,da,db)=>a.map((value,index)=>
+    value+(b[index]-value)*(0-da)/(db-da));
+  for (let i=0;i<world.length;i++) {
+    const previous=(i+world.length-1)%world.length;
+    const inside=values[i]<=epsilon,wasInside=values[previous]<=epsilon;
+    if (inside!==wasInside) output.push(crossing(world[previous],world[i],values[previous],values[i]));
+    if (inside) output.push(world[i]);
+  }
+  return output;
+}
+
+/** @param {QreaseePoint2} point @param {QreaseePoint} origin @param {QreaseePoint} axis @returns {number|null} */
+function sectionAxisDistance(point,origin,axis) {
+  const base=stagePoint(origin);
+  const tip=stagePoint([origin[0]+axis[0],origin[1]+axis[1],origin[2]+axis[2]]);
+  const dx=tip[0]-base[0],dy=tip[1]-base[1],length2=dx*dx+dy*dy;
+  if (!Number.isFinite(base[0])||length2<16) return null;
+  const target=((point[0]-base[0])*dx+(point[1]-base[1])*dy)/length2;
+  const measure=value=>{
+    const projected=stagePoint([origin[0]+axis[0]*value,origin[1]+axis[1]*value,
+      origin[2]+axis[2]*value]);
+    if (!Number.isFinite(projected[0])) return NaN;
+    return ((projected[0]-base[0])*dx+(projected[1]-base[1])*dy)/length2;
+  };
+  let distance=target;
+  for (let i=0;i<6;i++) {
+    const current=measure(distance);
+    const slope=(measure(distance+.01)-current)/.01;
+    if (!Number.isFinite(current)||!Number.isFinite(slope)||Math.abs(slope)<1e-6) break;
+    const next=distance+(target-current)/slope;
+    if (!Number.isFinite(next)) break;
+    if (Math.abs(next-distance)<1e-4) {distance=next;break;}
+    distance=next;
+  }
+  return clamp(distance,-20000,20000);
+}
+
+function renderSections() {
+  const list=$('#section-list');
+  if (!list) return;
+  list.replaceChildren();
+  const sections=sectionPlanes();
+  $('#sections-toggle').title=sections.length?'Bidang potong ('+sections.length+')':'Bidang potong';
+  if (!sections.length) {
+    const empty=document.createElement('div');
+    empty.className='section-empty';
+    empty.textContent='Belum ada bidang potong. Klik Bidang baru lalu klik sebuah bidang pada model.';
+    list.append(empty);
+    return;
+  }
+  const editable=canEditModel();
+  for (const section of sections) {
+    const enabled=section.enabled!==false;
+    const row=document.createElement('div');
+    row.className='section-row'+(enabled?' enabled':'')+
+      (activeSectionId===section.id?' active':'');
+    row.onclick=()=>{activeSectionId=section.id;renderSections();redraw();};
+    const head=document.createElement('div');head.className='section-row-head';
+    const symbol=document.createElement('span');symbol.className='section-symbol';
+    symbol.textContent=section.symbol || '§';
+    const name=document.createElement('div');name.className='section-name';
+    const title=document.createElement('strong');title.textContent=section.name;
+    const detail=document.createElement('small');
+    detail.textContent='Normal '+section.normal.map(value=>round(value)).join(', ');
+    name.append(title,detail);
+    const state=document.createElement('span');state.className='section-state';
+    state.textContent=enabled?'Aktif':'Nonaktif';
+    head.append(symbol,name,state);
+    const actions=document.createElement('div');actions.className='section-row-actions';
+    const move=document.createElement('button');move.type='button';move.textContent='Geser';
+    move.disabled=!editable;
+    move.onclick=event=>{event.stopPropagation();beginSectionMove(section);};
+    const flip=document.createElement('button');flip.type='button';flip.textContent='Balik';
+    flip.disabled=!editable;
+    flip.onclick=event=>{event.stopPropagation();updateSection(section,
+      {normal:[-section.normal[0],-section.normal[1],-section.normal[2]]});};
+    const toggle=document.createElement('button');toggle.type='button';
+    toggle.textContent=enabled?'Nonaktifkan':'Aktifkan';
+    toggle.disabled=!editable;
+    toggle.onclick=event=>{event.stopPropagation();updateSection(section,{enabled:!enabled});};
+    const remove=document.createElement('button');remove.type='button';remove.className='danger';
+    remove.textContent='Hapus';remove.disabled=!editable;
+    remove.onclick=event=>{event.stopPropagation();removeSection(section);};
+    actions.append(move,flip,toggle,remove);
+    row.append(head,actions);
+    list.append(row);
+  }
+}
+
+function toggleSections(force) {
+  const panel=$('#sections-panel');
+  const open=force===undefined?panel.hidden:force;
+  panel.hidden=!open;
+  $('#sections-toggle').setAttribute('aria-expanded',String(open));
+  if (open) {
+    $('#comments-panel').hidden=true;
+    $('#comments-toggle').setAttribute('aria-expanded','false');
+    renderSections();
+  }
+}
+
+/** @param {QreaseeSectionPlane} section @param {Partial<QreaseeSectionPlane>} changes */
+async function updateSection(section,changes) {
+  if (!canEditModel()) {showStatus('Akses ini tidak dapat mengubah model.');return false;}
+  const after={...section,...changes};
+  const saved=await commit({type:'section',before:section,after});
+  if (saved) {
+    activeSectionId=after.id;
+    showStatus('Bidang potong diperbarui.');
+  }
+  return saved;
+}
+
+/** @param {QreaseeSectionPlane} section */
+async function removeSection(section) {
+  if (!canEditModel()) {showStatus('Akses ini tidak dapat mengubah model.');return;}
+  const saved=await commit({type:'section',before:section,after:null});
+  if (saved) {
+    if (activeSectionId===section.id) activeSectionId=null;
+    showStatus('Bidang potong dihapus.');
+  }
+}
+
+/** @param {QreaseeSectionPlane} section */
+function beginSectionMove(section) {
+  if (!canEditModel()) {showStatus('Akses ini tidak dapat mengubah model.');return;}
+  setTool('section');
+  activeSectionId=section.id;
+  const normal=normalizePoint(section.normal);
+  state.sectionPending={base:section.origin,origin:section.origin,normal,offset:0,existing:section};
+  state.inference=null;
+  renderSections();
+  showStatus('Geser sepanjang normal bidang, lalu klik kedua untuk menetapkan.');
+  redraw();
+}
+
+/** @param {QreaseePoint2} start */
+function placeSectionAt(start) {
+  if (!canEditModel()) {showStatus('Akses ini tidak dapat mengubah model.');return;}
+  if (state.sectionPending) {
+    const pending=state.sectionPending;
+    const existing=pending.existing;
+    const index=sectionPlanes().length+1;
+    const after=existing
+      ? {...existing,origin:roundPoint(pending.origin)}
+      : {id:identity(),name:'Bidang potong '+index,symbol:String(index),
+        origin:roundPoint(pending.origin),normal:roundPoint(pending.normal),enabled:true};
+    const before=existing||null;
+    state.sectionPending=null;
+    state.inference=null;
+    commit({type:'section',before,after}).then(saved=>{
+      if (!saved) return;
+      activeSectionId=after.id;
+      showStatus('Bidang potong '+after.symbol+' dibuat.');
+      toggleSections(true);
+      renderSections();
+    });
+    redraw();
+    return;
+  }
+  const face=pickFace(start,false);
+  const normal=face?faceNormal(face.world):null;
+  if (!face||!normal||face.world.length<3) {
+    showStatus('Klik permukaan bidang untuk menempatkan bidang potong.');return;
+  }
+  const origin=face.world.reduce((sum,point)=>sum.map((value,i)=>value+point[i]/face.world.length),
+    [0,0,0]);
+  state.sectionPending={base:origin,origin,normal,offset:0,existing:null};
+  state.inference=null;
+  activeSectionId=null;
+  showStatus('Bidang potong siap. Geser sepanjang normal, lalu klik kedua.');
+  renderSections();
+  redraw();
+}
+
+function drawSectionPlanes() {
+  const preview=state.sectionPending
+    ? {id:'preview',name:'Pratinjau',symbol:'§',origin:state.sectionPending.origin,
+      normal:state.sectionPending.normal,enabled:true}
+    : null;
+  const list=[...activeSections(),...(preview?[preview]:[])];
+  if (!list.length) return;
+  ctx.save();
+  ctx.setLineDash([7,5]);
+  ctx.lineWidth=1.5;
+  for (const section of list) {
+    const quad=sectionQuad(section).map(stagePoint);
+    if (quad.some(point=>!Number.isFinite(point[0]))) continue;
+    ctx.strokeStyle=section.id==='preview'?'#e8a24d':
+      activeSectionId===section.id?'#e27f22':'#c98a42';
+    polygon(quad);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    for (const point of quad) {
+      ctx.beginPath();ctx.arc(point[0],point[1],5,0,Math.PI*2);
+      ctx.fillStyle='#fffaf2';ctx.fill();
+      ctx.strokeStyle='#d6842a';ctx.lineWidth=1.7;ctx.stroke();
+    }
+    ctx.setLineDash([7,5]);
+  }
+  ctx.restore();
+}
+
+/** @param {number[][]} segments @returns {QreaseePoint[][]} */
+function chainSectionSegments(segments) {
+  const key=point=>point.map(value=>Math.round(value*10000)).join(',');
+  const map=new Map();
+  segments.forEach((segment,index)=>{
+    for (const point of segment) {
+      const id=key(point);
+      if (!map.has(id)) map.set(id,[]);
+      map.get(id).push(index);
+    }
+  });
+  const used=new Set();
+  const loops=[];
+  for (let index=0;index<segments.length;index++) {
+    if (used.has(index)) continue;
+    const start=segments[index][0];
+    const loop=[start];
+    used.add(index);
+    let current=segments[index][1];
+    for (let guard=0;guard<segments.length+2;guard++) {
+      loop.push(current);
+      if (key(current)===key(start)) break;
+      const next=(map.get(key(current))||[]).find(candidate=>!used.has(candidate));
+      if (next===undefined) break;
+      used.add(next);
+      const segment=segments[next];
+      current=key(segment[0])===key(current)?segment[1]:segment[0];
+    }
+    if (loop.length>3 && key(loop[0])===key(loop[loop.length-1])) {
+      loop.pop();
+      loops.push(loop);
+    }
+  }
+  return loops;
+}
+
+/** @param {QreaseeMesh[]} meshes @param {QreaseeObject[]} objects @param {(point: QreaseePoint)=>number[]} projection */
+function sectionCaps(meshes,objects,projection) {
+  const sections=activeSections();
+  if (!sections.length) return [];
+  const groups=new Map();
+  objects.forEach((object,index)=>{
+    if (object.shape==='line') return;
+    const mesh=meshes[index];
+    if (!mesh?.faces?.length) return;
+    const id=object.solid_id||object.id;
+    if (!groups.has(id)) groups.set(id,{object,meshes:[]});
+    groups.get(id).meshes.push(mesh);
+  });
+  const faces=[];
+  for (const [groupId,group] of groups) {
+    for (const section of sections) {
+      const segments=[];
+      for (const mesh of group.meshes) {
+        for (const face of mesh.faces) {
+          const world=face.map(index=>mesh.vertices[index]);
+          if (world.length<3) continue;
+          const normal=normalizePoint(section.normal);
+          const values=world.map(point=>normal[0]*(point[0]-section.origin[0])+
+            normal[1]*(point[1]-section.origin[1])+normal[2]*(point[2]-section.origin[2]));
+          if (values.every(value=>Math.abs(value)<1e-6)) continue;
+          const points=[];
+          for (let i=0;i<world.length;i++) {
+            const next=(i+1)%world.length;
+            const a=world[i],b=world[next],da=values[i],db=values[next];
+            if ((da>1e-6&&db<-1e-6)||(da<-1e-6&&db>1e-6)) {
+              points.push(a.map((value,axis)=>value+(b[axis]-value)*(-da)/(db-da)));
+            } else {
+              if (Math.abs(da)<=1e-6) points.push(a);
+              if (Math.abs(db)<=1e-6) points.push(b);
+            }
+          }
+          const unique=[];
+          for (const point of points) {
+            if (!unique.some(item=>Math.hypot(item[0]-point[0],item[1]-point[1],
+              item[2]-point[2])<1e-5)) unique.push(point);
+          }
+          if (unique.length>=2) {
+            segments.push([unique[0],unique[1]]);
+          }
+        }
+      }
+      for (const loop of chainSectionSegments(segments)) {
+        let polygonWorld=loop;
+        for (const other of sections) {
+          if (other.id===section.id) continue;
+          polygonWorld=clipSectionPolygon(polygonWorld,other);
+          if (polygonWorld.length<3) break;
+        }
+        if (polygonWorld.length<3) continue;
+        const points=polygonWorld.map(projection);
+        if (points.some(point=>!Number.isFinite(point[0]))) continue;
+        const depth=points.reduce((sum,point)=>sum+point[2],0)/points.length+.05;
+        faces.push({object:group.object,points,world:polygonWorld,top:false,tone:.9,
+          cut:true,section:true,smooth:false,quiet:false,depth,
+          key:'section:'+section.id+':'+groupId});
+      }
+    }
+  }
+  return faces;
 }
 
 const comments = () => state.doc?.comments || [];
@@ -1209,7 +1672,11 @@ function toggleComments(force) {
   const open=force===undefined?panel.hidden:force;
   panel.hidden=!open;
   $('#comments-toggle').setAttribute('aria-expanded',String(open));
-  if (open) renderComments();
+  if (open) {
+    $('#sections-panel').hidden=true;
+    $('#sections-toggle').setAttribute('aria-expanded','false');
+    renderComments();
+  }
 }
 
 /** @param {number} clientX @param {number} clientY */
@@ -1460,6 +1927,13 @@ function commentPinAt(point) {
 
 $('#comments-toggle').onclick=()=>toggleComments($('#comments-panel').hidden);
 $('#comments-close').onclick=()=>toggleComments(false);
+$('#sections-toggle').onclick=()=>toggleSections($('#sections-panel').hidden);
+$('#sections-close').onclick=()=>toggleSections(false);
+$('#section-add').onclick=()=>{
+  setTool('section');
+  toggleSections(false);
+  showStatus('Klik sebuah bidang pada model untuk menempatkan bidang potong.');
+};
 $('#comment-cancel').onclick=closeCommentComposer;
 $('#comment-send').onclick=submitComment;
 $('#comment-text').addEventListener('input',renderCommentMentions);
@@ -2635,6 +3109,7 @@ function clipNear(world) {
 
 function scene(meshes, objects, projection) {
   const faces = [];
+  const sections=activeSections();
   const clip=projection===stagePoint && camera.perspective;
   meshes.forEach((mesh,index) => {
     if (!mesh.vertices.length) return;
@@ -2644,10 +3119,16 @@ function scene(meshes, objects, projection) {
     const quiet = Boolean(object.hide_edges) || Boolean(object.opening_id) && object.surface_role==='side';
     const entries = mesh.faces.length ? mesh.faces : [[0,1]];
     for (const [entryIndex, face] of entries.entries()) {
-      const world=face.map(i=>mesh.vertices[i]);
+      const original=face.map(i=>mesh.vertices[i]);
+      let world=original;
+      for (const section of sections) {
+        world=clipSectionPolygon(world,section);
+        if (!world.length) break;
+      }
+      if (!world.length) continue;
       const visible=clip?clipNear(world):world;
       if (visible.length<Math.min(face.length,3)) continue;
-      const points=visible===world?face.map(i=>projected[i]):visible.map(projection);
+      const points=visible===original?face.map(i=>projected[i]):visible.map(projection);
       if (points.some(point=>!Number.isFinite(point[0]))) continue;
       const area = points.reduce((sum,p,i) => {
         const q = points[(i+1)%points.length];
@@ -2667,7 +3148,7 @@ function scene(meshes, objects, projection) {
         }
       }
       const ring=object.profile?.points.length;
-      const edges=visible===world && ring && face.length===3 ? face.map((index,i)=>{
+      const edges=visible===original && ring && face.length===3 ? face.map((index,i)=>{
         const delta=Math.abs(index%ring-face[(i+1)%face.length]%ring);
         return delta===1 || delta===ring-1;
       }) : null;
@@ -2676,6 +3157,7 @@ function scene(meshes, objects, projection) {
         smooth,quiet,key:object.id+':'+index+':'+entryIndex});
     }
   });
+  faces.push(...sectionCaps(meshes,objects,projection));
   return orderFaces(faces);
 }
 
@@ -2749,6 +3231,103 @@ function overlap(a,b) {
 function shade(color,multiplier) {
   const value = parseInt(color.slice(1),16);
   return 'rgb(' + [16,8,0].map(shift => Math.round(((value >> shift) & 255)*multiplier)).join(',') + ')';
+}
+
+/** @param {QreaseeHit} face */
+function drawMaterialTexture(face) {
+  const material=face.object.material;
+  const preset=material?materialById.get(material):null;
+  if (!preset || preset.pattern==='paint' || face.points.length<3) return;
+  const xs=face.points.map(point=>point[0]),ys=face.points.map(point=>point[1]);
+  const left=Math.min(...xs),right=Math.max(...xs),top=Math.min(...ys),bottom=Math.max(...ys);
+  const width=right-left,height=bottom-top;
+  if (width<3||height<3) return;
+  let seed=2166136261;
+  for (const character of face.object.id+preset.pattern) {
+    seed^=character.charCodeAt(0);
+    seed=Math.imul(seed,16777619);
+  }
+  const random=()=>{
+    seed=(Math.imul(seed,1664525)+1013904223)>>>0;
+    return seed/4294967296;
+  };
+  ctx.save();
+  polygon(face.points);
+  ctx.clip();
+  ctx.lineWidth=.7;
+  const horizontalLines=(step,color='#00000024')=>{
+    ctx.strokeStyle=color;
+    for (let y=top+step;y<bottom;y+=step) {
+      ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();
+    }
+  };
+  const verticalLines=(step,color='#00000020',offset=0)=>{
+    ctx.strokeStyle=color;
+    for (let x=left+offset;x<right;x+=step) {
+      ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,bottom);ctx.stroke();
+    }
+  };
+  if (preset.pattern==='brick') {
+    horizontalLines(9);
+    for (let row=0,y=top;y<bottom;y+=9,row++) {
+      const offset=row%2?0:9;
+      ctx.strokeStyle='#00000020';
+      for (let x=left+offset;x<right;x+=18) {
+        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,Math.min(bottom,y+9));ctx.stroke();
+      }
+    }
+  } else if (preset.pattern==='block') {
+    horizontalLines(13,'#0000001d');
+    for (let row=0,y=top;y<bottom;y+=13,row++) {
+      const offset=row%2?0:10;
+      ctx.strokeStyle='#00000018';
+      for (let x=left+offset;x<right;x+=20) {
+        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,Math.min(bottom,y+13));ctx.stroke();
+      }
+    }
+  } else if (preset.pattern==='timber') {
+    ctx.strokeStyle='#00000024';
+    for (let line=1;line<7;line++) {
+      const base=top+height*line/7;
+      ctx.beginPath();
+      for (let x=left;x<=right;x+=12) {
+        const y=base+Math.sin((x-left)/17+line)*1.4+(random()-.5);
+        if (x===left) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.stroke();
+    }
+  } else if (preset.pattern==='zinc'||preset.pattern==='metal') {
+    const step=preset.pattern==='zinc'?9:14;
+    verticalLines(step,'#00000028');
+    verticalLines(step,'#ffffff3d',1);
+  } else if (preset.pattern==='tile') {
+    horizontalLines(9,'#0000002e');
+    for (let row=0,y=top;y<bottom;y+=9,row++) {
+      ctx.strokeStyle='#ffffff2c';
+      for (let x=left+(row%2?0:7);x<right;x+=14) {
+        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,Math.min(bottom,y+9));ctx.stroke();
+      }
+    }
+  } else if (preset.pattern==='glass') {
+    ctx.fillStyle='#ffffff24';ctx.fillRect(left,top,width,height);
+    ctx.strokeStyle='#ffffff45';ctx.lineWidth=2;
+    for (let offset=-height;offset<width;offset+=28) {
+      ctx.beginPath();ctx.moveTo(left+offset,bottom);ctx.lineTo(left+offset+height,top);ctx.stroke();
+    }
+  } else if (preset.pattern==='grass'||preset.pattern==='sand'||preset.pattern==='asphalt') {
+    const count=preset.pattern==='grass'?55:75;
+    for (let i=0;i<count;i++) {
+      const x=left+random()*width,y=top+random()*height;
+      if (preset.pattern==='grass') {
+        ctx.strokeStyle=i%3?'#ffffff30':'#00000028';
+        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+(random()-.5)*2,y-2-random()*3);ctx.stroke();
+      } else {
+        ctx.fillStyle=i%3?'#ffffff33':(preset.pattern==='asphalt'?'#0000003a':'#00000020');
+        ctx.beginPath();ctx.arc(x,y,random()*1.4+.4,0,Math.PI*2);ctx.fill();
+      }
+    }
+  }
+  ctx.restore();
 }
 /** @param {QreaseePoint[]} face @returns {number} */
 function smoothTone(face) {
@@ -2840,7 +3419,8 @@ function draw() {
       objects=objects.map(object=>preview.get(object.id)||object);
     }
     const sceneKey=updates?null:JSON.stringify([width,height,camera.yaw,camera.pitch,
-      camera.axes,camera.center,camera.x,camera.y,camera.scale,camera.distance,camera.perspective]);
+      camera.axes,camera.center,camera.x,camera.y,camera.scale,camera.distance,camera.perspective,
+      state.doc.sections||[]]);
     if (sceneCache && !updates && sceneCache.meshes===meshes && sceneCache.objects===objects &&
         sceneCache.key===sceneKey) state.hits=sceneCache.faces;
     else {
@@ -2853,8 +3433,9 @@ function draw() {
         (state.hoverKey===face.key || (face.smooth && state.hoverKey===face.object.id));
       polygon(face.points);
       if (face.points.length > 2) {
-        ctx.fillStyle = shade(face.object.color,face.tone);
+        ctx.fillStyle = shade(face.object.color,face.section ? .9 : face.tone);
         ctx.fill();
+        drawMaterialTexture(face);
         if (selected || hovered) {
           ctx.save();
           ctx.fillStyle = selected ? selectionPattern : hoverPattern;
@@ -2862,8 +3443,9 @@ function draw() {
           ctx.restore();
         }
       }
-      ctx.strokeStyle = selected ? '#c87936' : dark ? '#aeb3b7' : '#4f5150';
-      ctx.lineWidth = selected ? 1.65 : .8;
+      ctx.strokeStyle = face.section ? '#c87936' :
+        selected ? '#c87936' : dark ? '#aeb3b7' : '#4f5150';
+      ctx.lineWidth = face.section ? 1.35 : selected ? 1.65 : .8;
       if (face.edges) {
         ctx.beginPath();
         for (let i=0;i<face.edges.length;i++) {
@@ -2874,6 +3456,7 @@ function draw() {
       }
       if (!face.smooth && !face.quiet) ctx.stroke();
     }
+    drawSectionPlanes();
   } else state.hits = [];
   if (state.drag?.tool==='erase' && state.drag.seen?.size) {
     for (const face of state.hits) {
@@ -3611,6 +4194,7 @@ canvas.addEventListener('pointerdown',event=>{
       redraw();
       return;
     }
+    if (tool==='section') {placeSectionAt(start);return;}
     let face=pickFace(start,tool!=='pull');
     let planeWall=null;
     if (tool==='rectangle'||tool==='circle') {
@@ -3802,6 +4386,20 @@ canvas.addEventListener('pointermove',event=>{
     state.hoverKey=hovered ? (hovered.smooth ? hovered.object.id : hovered.key) : null;
   } else state.hoverKey=null;
   if (!drag) {
+    if (state.sectionPending) {
+      const pending=state.sectionPending;
+      const distance=sectionAxisDistance(point,pending.base,pending.normal);
+      if (distance!==null) {
+        const value=state.snapping?snap(distance,.05):round(distance);
+        pending.offset=value;
+        pending.origin=/** @type {QreaseePoint} */ (pending.base.map(
+          (coordinate,index)=>coordinate+pending.normal[index]*value));
+        showStatus('Geser bidang '+lengthLabel(value)+' sepanjang normal; klik kedua untuk menetapkan.');
+      }
+      state.inference=null;
+      redraw();
+      return;
+    }
     if (state.measurePending) {
       const pending=state.measurePending;
       const candidate=infer(point,undefined) || drawingPoint(point,pending.elevation);
@@ -4093,6 +4691,7 @@ window.addEventListener('keydown',event=>{
     if (!$('#account-menu').hidden) {accountMenu(false);return;}
     if (!$('#object-menu').hidden) {hideObjectMenu();return;}
     if (!$('#comment-composer').hidden) {closeCommentComposer();return;}
+    if (!$('#sections-panel').hidden) {toggleSections(false);return;}
     if (state.drag) {state.drag=null;state.inference=null;setTool('select');redraw();return;}
     if (state.arcPending) {state.arcPending=null;state.inference=null;setTool('select');redraw();return;}
     if (state.drawPending) {state.drawPending=null;state.inference=null;setTool('select');redraw();return;}
@@ -4101,6 +4700,8 @@ window.addEventListener('keydown',event=>{
     if (state.offsetPending) {state.offsetPending=null;state.inference=null;setTool('select');redraw();return;}
     if (state.measurePending) {state.measurePending=null;state.inference=null;
       showStatus('Pengukuran dibatalkan. Klik titik awal baru atau Esc untuk keluar.');redraw();return;}
+    if (state.sectionPending) {state.sectionPending=null;state.inference=null;
+      showStatus('Bidang potong dibatalkan.');redraw();return;}
     if (state.linePending) {finishLine();setTool('select');return;}
     if (typing) return;
     if (state.inside) {exitContainer();return;}
@@ -4181,10 +4782,11 @@ const layoutDefaults=()=>({
     {id:'base-iso',mode:'iso',x:242,y:14,w:164,h:130,title:'AKSONOMETRI',grid:false},
     {id:'base-front',mode:'front',x:14,y:150,w:222,h:98,title:'TAMPAK DEPAN',grid:false},
     {id:'base-right',mode:'right',x:242,y:150,w:164,h:98,title:'TAMPAK KANAN',grid:false}
-  ],texts:[],dimensions:[]
+  ],texts:[],dimensions:[],gridLines:[]
 });
 const sheetLayout=()=>state.doc?.sheet.layout || layoutDefaults();
 let layoutTool='select',layoutSelected=null,layoutDrag=null,layoutDimensionStart=null;
+let layoutActiveViewId=null,layoutGridPending=null,layoutGridHover=null;
 let layoutZoom=1;
 function saveSheetLayout(layout) {
   if (!state.doc || state.busy) return Promise.resolve(false);
@@ -4206,16 +4808,43 @@ function selectLayoutItem(kind,id) {
   panel.hidden=false;
   const view=kind==='view'?sheetLayout().views.find(item=>item.id===id):null;
   const item=kind==='text'?sheetLayout().texts.find(item=>item.id===id):null;
+  const grid=kind==='grid'?(sheetLayout().gridLines||[]).find(item=>item.id===id):null;
   $('#layout-view-title-row').hidden=!view;
   $('#layout-text-row').hidden=!item;
+  $('#layout-grid-name-row').hidden=!grid;
   if(view) $('#layout-view-title').value=view.title;
   if(item) $('#layout-text-value').value=item.text;
+  if(grid) $('#layout-grid-name').value=grid.name;
   drawSheet();
 }
 function setLayoutTool(tool) {
+  if(tool!=='select'&&!layoutActiveViewId)return;
   layoutTool=tool;layoutDimensionStart=null;
+  layoutGridPending=null;layoutGridHover=null;
   $('#layout-stage').dataset.tool=tool;
   document.querySelectorAll('.layout-tool').forEach(/** @param {HTMLElement} button */ button=>button.classList.toggle('active',button.dataset.layoutTool===tool));
+  drawSheet();
+}
+function enterLayoutView(id) {
+  const view=sheetLayout().views.find(item=>item.id===id);
+  if(!view)return;
+  layoutActiveViewId=id;
+  $('#layout-stage').classList.add('editing-view');
+  $('#layout-mode-label').textContent='Mengedit view: '+view.title;
+  $('#layout-finish').hidden=false;
+  $('#layout-view-tools').hidden=false;
+  $('.layout-title-details').open=false;
+  setLayoutTool('select');
+  selectLayoutItem('view',id);
+}
+function exitLayoutView() {
+  layoutActiveViewId=null;
+  layoutGridPending=null;layoutGridHover=null;layoutDimensionStart=null;
+  $('#layout-stage').classList.remove('editing-view');
+  $('#layout-mode-label').textContent='Double click view untuk mengedit isinya';
+  $('#layout-finish').hidden=true;
+  $('#layout-view-tools').hidden=true;
+  setLayoutTool('select');
 }
 
 function drawSheet() {
@@ -4232,7 +4861,7 @@ function drawSheet() {
   let clipped=false;
   for (const view of viewports) {
     const {id,x,y,w,h,mode}=view,dimensions=mode==='plan';
-    const frame=svg('g',{'data-view-id':id,class:layoutSelected?.kind==='view'&&layoutSelected.id===id?'layout-selected':''});
+    const frame=svg('g',{'data-view-id':id,class:[layoutSelected?.kind==='view'&&layoutSelected.id===id?'layout-selected':'',layoutActiveViewId===id?'layout-active':''].filter(Boolean).join(' ')});
     sheet.append(frame);
     const addView=(name,attrs,value)=>frame.append(svg(name,attrs,value));
     const viewText=(tx,ty,value,options={})=>addView('text',{x:tx,y:ty,fill:'#23313b','font-family':'Segoe UI, Arial, sans-serif','font-size':3.2,...options},value);
@@ -4240,7 +4869,7 @@ function drawSheet() {
     addView('rect',{x,y,width:w,height:h,fill:'#fdfdfd',stroke:'#c1c9ce','stroke-width':.28});
     const raw=basis(views[mode][0],views[mode][1]);
     const points=meshes.flatMap(mesh=>mesh.vertices.map(raw));
-    const clipId='clip-'+mode;
+    const clipId='clip-'+id;
     const clip=svg('clipPath',{id:clipId});
     clip.append(svg('rect',{x:x+1,y:y+1,width:w-2,height:h-13}));
     sheet.append(clip);
@@ -4291,17 +4920,45 @@ function drawSheet() {
         viewText(center[0],dy-1.5,lengthLabel(max[0]-min[0]),{'text-anchor':'middle','font-size':2.9});
       }
     }
+    for(const grid of (layout.gridLines||[]).filter(item=>item.viewId===id)) {
+      const [ax,ay]=grid.a,[bx,by]=grid.b;
+      const head=[x+ax,y+ay],tail=[x+bx,y+by];
+      const mark=svg('g',{'data-grid-id':grid.id,class:layoutSelected?.kind==='grid'&&layoutSelected.id===grid.id?'layout-selected':''});
+      mark.append(svg('line',{x1:head[0],y1:head[1],x2:tail[0],y2:tail[1],stroke:'#437a9e','stroke-width':.34,'stroke-dasharray':'3 1.4'}));
+      mark.append(svg('line',{x1:head[0],y1:head[1],x2:tail[0],y2:tail[1],stroke:'transparent','stroke-width':5}));
+      mark.append(svg('circle',{cx:head[0],cy:head[1],r:3.1,fill:'#fff',stroke:'#366b91','stroke-width':.45}));
+      mark.append(svg('text',{x:head[0],y:head[1]+1,'text-anchor':'middle',fill:'#225579','font-family':'Segoe UI, Arial, sans-serif','font-size':2.7,'font-weight':700},grid.name));
+      mark.append(svg('circle',{cx:tail[0],cy:tail[1],r:.65,fill:'#366b91'}));
+      frame.append(mark);
+    }
+    if(layoutGridPending?.viewId===id) {
+      const [ax,ay]=layoutGridPending.a,[bx,by]=layoutGridHover||layoutGridPending.a;
+      addView('line',{x1:x+ax,y1:y+ay,x2:x+bx,y2:y+by,stroke:'#e78c38','stroke-width':.45,'stroke-dasharray':'2 1'});
+      addView('circle',{cx:x+ax,cy:y+ay,r:3,fill:'#fff',stroke:'#e78c38','stroke-width':.5});
+    }
     for(const dimension of layout.dimensions.filter(item=>item.viewId===id)) {
-      const [ax,ay]=dimension.a,[bx,by]=dimension.b;
+      let aLocal=dimension.a,bLocal=dimension.b;
+      const gridA=dimension.gridA&&(layout.gridLines||[]).find(item=>item.id===dimension.gridA);
+      const gridB=dimension.gridB&&(layout.gridLines||[]).find(item=>item.id===dimension.gridB);
+      if(gridA&&gridB) {
+        const dx=gridA.b[0]-gridA.a[0],dy=gridA.b[1]-gridA.a[1],len=Math.hypot(dx,dy)||1;
+        const normal=[-dy/len,dx/len],distance=(gridB.a[0]-gridA.a[0])*normal[0]+(gridB.a[1]-gridA.a[1])*normal[1];
+        aLocal=[gridA.a[0]-dx/len*7,gridA.a[1]-dy/len*7];
+        bLocal=[aLocal[0]+normal[0]*distance,aLocal[1]+normal[1]*distance];
+      }
+      const [ax,ay]=aLocal,[bx,by]=bLocal;
       const horizontal=Math.abs(bx-ax)>=Math.abs(by-ay);
-      const offset=6;
+      const offset=gridA?0:6;
       const a=[x+ax,y+ay],b=[x+bx,y+by];
       const p1=horizontal?[a[0],a[1]+offset]:[a[0]+offset,a[1]];
       const p2=horizontal?[b[0],a[1]+offset]:[a[0]+offset,b[1]];
-      for(const [s,e] of [[a,p1],[b,p2],[p1,p2]]) addView('line',{x1:s[0],y1:s[1],x2:e[0],y2:e[1],stroke:'#284c5e','stroke-width':.3});
+      const dimensionGroup=svg('g',{'data-dimension-id':dimension.id,class:layoutSelected?.kind==='dimension'&&layoutSelected.id===dimension.id?'layout-selected':''});
+      for(const [s,e] of [[a,p1],[b,p2],[p1,p2]]) dimensionGroup.append(svg('line',{x1:s[0],y1:s[1],x2:e[0],y2:e[1],stroke:'#284c5e','stroke-width':.3}));
+      dimensionGroup.append(svg('line',{x1:p1[0],y1:p1[1],x2:p2[0],y2:p2[1],stroke:'transparent','stroke-width':5}));
       for(const p of [p1,p2]) addView('circle',{cx:p[0],cy:p[1],r:.7,fill:'#284c5e'});
       const metres=Math.hypot(bx-ax,by-ay)*settings.scale/1000;
-      viewText((p1[0]+p2[0])/2,(p1[1]+p2[1])/2-1.2,lengthLabel(metres),{'text-anchor':'middle','font-size':3,fill:'#284c5e'});
+      dimensionGroup.append(svg('text',{x:(p1[0]+p2[0])/2,y:(p1[1]+p2[1])/2-1.2,'text-anchor':'middle','font-family':'Segoe UI, Arial, sans-serif','font-size':3,fill:'#284c5e'},lengthLabel(metres)));
+      frame.append(dimensionGroup);
     }
     const caption=mode==='plan'?view.title+'  /  POTONG '+lengthLabel(settings.cut_height):view.title;
     viewText(x+3,y+h-5,caption,{'font-weight':700});
@@ -4337,7 +4994,7 @@ function drawSheet() {
   for(const item of layout.texts) {
     const draft=layoutDrag?.kind==='text'&&layoutDrag.id===item.id?layoutDrag:null;
     const x=draft?.x??item.x,y=draft?.y??item.y;
-    const group=svg('g',{'data-text-id':item.id,class:layoutSelected?.kind==='text'&&layoutSelected.id===item.id?'layout-selected':''});
+    const group=svg('g',{'data-text-id':item.id,class:[layoutSelected?.kind==='text'&&layoutSelected.id===item.id?'layout-selected':'',item.viewId===layoutActiveViewId?'layout-active':''].filter(Boolean).join(' ')});
     group.append(svg('rect',{x:x-1,y:y-item.size,width:Math.max(12,item.text.length*item.size*.55),height:item.size+2,fill:'transparent',stroke:layoutSelected?.id===item.id?'#ec8d35':'none','stroke-width':.5}));
     group.append(svg('text',{x,y,fill:'#23313b','font-family':'Segoe UI, Arial, sans-serif','font-size':item.size},item.text));
     sheet.append(group);
@@ -4346,7 +5003,7 @@ function drawSheet() {
     ? 'Ada tampilan yang terpotong. Gunakan penyebut skala yang lebih besar.'
     : 'Untuk menjaga skala, cetak A3 pada ukuran aktual (100%).';
   drawLayoutCursors();
-  if (!layoutDrag) {
+  if (!layoutDrag && !layoutGridPending) {
     const thumbnail=sheet.cloneNode(true);
     thumbnail.id='sheet-mini';
     thumbnail.querySelector('.remote-cursors')?.remove();
@@ -4373,6 +5030,12 @@ $('#sheet').addEventListener('pointermove',event=>{
   const point=sheetPoint(event);
   if (!point) return;
   state.cursor={mode:'layout',x:round(point[0]),y:round(point[1])};
+  if(layoutGridPending) {
+    const view=sheetLayout().views.find(item=>item.id===layoutGridPending.viewId);
+    if(view)layoutGridHover=layoutSnap(view,point);
+    drawSheet();
+    return;
+  }
   if (layoutDrag) {
     const source=layoutDrag.kind==='view'?sheetLayout().views.find(item=>item.id===layoutDrag.id)
       :sheetLayout().texts.find(item=>item.id===layoutDrag.id);
@@ -4414,11 +5077,15 @@ $('#sheet').addEventListener('pointerdown',event=>{
   const point=sheetPoint(event);
   if (!point) return;
   const view=layoutViewAt(point);
+  if(layoutTool!=='select' && (!layoutActiveViewId || view?.id!==layoutActiveViewId)) {
+    showStatus('Double click view yang ingin diedit terlebih dahulu.');return;
+  }
   if(layoutTool==='text') {
-    const value=prompt('Teks pada lembar:');
+    const value=prompt('Teks dalam view:');
     if(value?.trim()) {
       const layout=sheetLayout();
-      const item={id:identity(),x:clamp(point[0],9,411),y:clamp(point[1],9,288),text:value.trim().slice(0,150),size:4};
+      const item={id:identity(),viewId:view.id,x:clamp(point[0],view.x+2,view.x+view.w-2),
+        y:clamp(point[1],view.y+6,view.y+view.h-13),text:value.trim().slice(0,150),size:4};
       saveSheetLayout({...layout,texts:[...layout.texts,item]}).then(saved=>{
         if(saved) selectLayoutItem('text',item.id);
       });
@@ -4427,33 +5094,63 @@ $('#sheet').addEventListener('pointerdown',event=>{
   }
   if(layoutTool==='grid') {
     if (!view || view.mode==='iso') {showStatus('Grid tersedia pada denah dan tampak ortografis.');return;}
-    const layout=sheetLayout();
-    saveSheetLayout({...layout,views:layout.views.map(item=>item.id===view.id?{...item,grid:!item.grid}:item)});
-    setLayoutTool('select');return;
+    const local=layoutSnap(view,point);
+    if(!layoutGridPending || layoutGridPending.viewId!==view.id) {
+      layoutGridPending={viewId:view.id,a:local};
+      layoutGridHover=local;
+      showStatus('Kepala grid ditetapkan. Klik titik ekornya.');
+      drawSheet();return;
+    }
+    const start=layoutGridPending;
+    if(Math.hypot(local[0]-start.a[0],local[1]-start.a[1])<2)return;
+    const layout=sheetLayout(),number=(layout.gridLines||[]).filter(item=>item.viewId===view.id).length;
+    const suggested=String.fromCharCode(65+number%26)+(number>=26?Math.floor(number/26)+1:'');
+    const name=prompt('Nama grid pada bubble:',suggested)?.trim();
+    if(!name)return;
+    const line={id:identity(),viewId:view.id,a:start.a,b:local,name:name.slice(0,12)};
+    layoutGridPending=null;layoutGridHover=null;
+    saveSheetLayout({...layout,gridLines:[...(layout.gridLines||[]),line]}).then(saved=>{
+      if(saved)selectLayoutItem('grid',line.id);
+    });
+    showStatus('Grid '+line.name+' dibuat. Klik kepala grid berikutnya.');
+    return;
   }
   if(layoutTool==='dimension') {
     if (!view || view.mode==='iso') {showStatus('Dimensi tersedia pada denah dan tampak ortografis.');return;}
-    const local=layoutSnap(view,point);
+    const gridId=event.target.closest('[data-grid-id]')?.getAttribute('data-grid-id');
+    const layout=sheetLayout(),grid=(layout.gridLines||[]).find(item=>item.id===gridId&&item.viewId===view.id);
+    if(!grid) {showStatus('Klik batang grid pertama, lalu batang grid sebelahnya.');return;}
     if(!layoutDimensionStart || layoutDimensionStart.viewId!==view.id) {
-      layoutDimensionStart={viewId:view.id,a:local};
-      showStatus('Klik titik kedua dimensi pada view yang sama.');
+      layoutDimensionStart={viewId:view.id,gridId:grid.id};
+      showStatus('Grid '+grid.name+' dipilih. Klik batang grid kedua.');
     } else {
-      const start=layoutDimensionStart;
-      if(Math.hypot(local[0]-start.a[0],local[1]-start.a[1])>=2) {
-        const layout=sheetLayout();
-        saveSheetLayout({...layout,dimensions:[...layout.dimensions,{id:identity(),viewId:view.id,a:start.a,b:local}]});
-      }
-      setLayoutTool('select');
+      const first=(layout.gridLines||[]).find(item=>item.id===layoutDimensionStart.gridId);
+      if(!first || first.id===grid.id)return;
+      const ad=[first.b[0]-first.a[0],first.b[1]-first.a[1]],bd=[grid.b[0]-grid.a[0],grid.b[1]-grid.a[1]];
+      const parallel=Math.abs((ad[0]*bd[0]+ad[1]*bd[1])/(Math.hypot(...ad)*Math.hypot(...bd)));
+      if(parallel<.98){showStatus('Dimensi antar-grid memerlukan dua garis sejajar.');return;}
+      const dimension={id:identity(),viewId:view.id,a:first.a,b:grid.a,gridA:first.id,gridB:grid.id};
+      saveSheetLayout({...layout,dimensions:[...layout.dimensions,dimension]});
+      layoutDimensionStart=null;
+      showStatus('Dimensi antar-grid dibuat. Pilih pasangan berikutnya.');
     }
     return;
   }
-  const target=event.target.closest('[data-text-id],[data-view-id]');
-  const kind=target?.hasAttribute('data-text-id')?'text':target?.hasAttribute('data-view-id')?'view':null;
+  const target=event.target.closest('[data-grid-id],[data-dimension-id],[data-text-id],[data-view-id]');
+  const kind=target?.hasAttribute('data-grid-id')?'grid':target?.hasAttribute('data-dimension-id')?'dimension':
+    target?.hasAttribute('data-text-id')?'text':target?.hasAttribute('data-view-id')?'view':null;
   if(kind) {
-    const id=target.getAttribute(kind==='text'?'data-text-id':'data-view-id');
+    const attribute={grid:'data-grid-id',dimension:'data-dimension-id',text:'data-text-id',view:'data-view-id'}[kind];
+    const id=target.getAttribute(attribute);
+    if(layoutActiveViewId && kind==='view' && id!==layoutActiveViewId) {
+      showStatus('Double click view lain untuk beralih.');return;
+    }
+    if(layoutActiveViewId && kind==='grid' && !(sheetLayout().gridLines||[]).some(item=>item.id===id&&item.viewId===layoutActiveViewId))return;
     selectLayoutItem(kind,id);
+    if(layoutActiveViewId && kind!=='text')return;
     const source=kind==='view'?sheetLayout().views.find(item=>item.id===id)
       :sheetLayout().texts.find(item=>item.id===id);
+    if(!source)return;
     layoutDrag={kind,id,start:point,x:source.x,y:source.y};
     event.currentTarget.setPointerCapture(event.pointerId);
   } else if(point[1]>=254) {
@@ -4467,14 +5164,29 @@ $('#sheet').addEventListener('pointerup',event=>{
   const source=drag.kind==='view'?sheetLayout().views.find(item=>item.id===drag.id)
     :sheetLayout().texts.find(item=>item.id===drag.id);
   if (!source) return;
-  const x=drag.kind==='view'?clamp(drag.x,9,411-source.w):clamp(drag.x,9,411);
-  const y=drag.kind==='view'?clamp(drag.y,9,252-source.h):clamp(drag.y,9,288);
+  const host=drag.kind==='text'&&source.viewId?sheetLayout().views.find(item=>item.id===source.viewId):null;
+  const x=drag.kind==='view'?clamp(drag.x,9,411-source.w):host?clamp(drag.x,host.x+2,host.x+host.w-2):clamp(drag.x,9,411);
+  const y=drag.kind==='view'?clamp(drag.y,9,252-source.h):host?clamp(drag.y,host.y+6,host.y+host.h-13):clamp(drag.y,9,288);
   if(Math.hypot(x-source.x,y-source.y)<.5){drawSheet();return;}
   const layout=sheetLayout();
   const key=drag.kind==='view'?'views':'texts';
   saveSheetLayout({...layout,[key]:layout[key].map(item=>item.id===drag.id?{...item,x,y}:item)});
 });
 $('#sheet').addEventListener('pointercancel',()=>{layoutDrag=null;drawSheet();});
+$('#sheet').addEventListener('dblclick',event=>{
+  const id=event.target.closest('[data-view-id]')?.getAttribute('data-view-id') ||
+    layoutViewAt(sheetPoint(event))?.id;
+  if(id)enterLayoutView(id);
+});
+$('#layout-finish').onclick=exitLayoutView;
+document.addEventListener('keydown',event=>{
+  if(event.key==='Escape' && state.layout && layoutActiveViewId &&
+    !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)) {
+    event.preventDefault();event.stopPropagation();
+    if(layoutGridPending || layoutDimensionStart)setLayoutTool('select');
+    else exitLayoutView();
+  }
+},true);
 document.querySelectorAll('.layout-tool').forEach(/** @param {HTMLElement} button */ button=>button.onclick=()=>setLayoutTool(button.dataset.layoutTool));
 $('#layout-zoom').onchange=event=>{
   layoutZoom=Number(event.target.value);
@@ -4509,11 +5221,25 @@ $('#layout-text-value').onchange=event=>{
   const layout=sheetLayout(),value=event.target.value.trim();if(!value)return;
   saveSheetLayout({...layout,texts:layout.texts.map(item=>item.id===layoutSelected.id?{...item,text:value}:item)});
 };
+$('#layout-grid-name').onchange=event=>{
+  if(layoutSelected?.kind!=='grid')return;
+  const name=event.target.value.trim();if(!name)return;
+  const layout=sheetLayout();
+  saveSheetLayout({...layout,gridLines:(layout.gridLines||[]).map(item=>item.id===layoutSelected.id?{...item,name}:item)});
+};
 $('#layout-delete').onclick=()=>{
   if(!layoutSelected)return;
   const layout=sheetLayout();
   const next=layoutSelected.kind==='view'
-    ?{...layout,views:layout.views.filter(item=>item.id!==layoutSelected.id),dimensions:layout.dimensions.filter(item=>item.viewId!==layoutSelected.id)}
+    ?{...layout,views:layout.views.filter(item=>item.id!==layoutSelected.id),
+      gridLines:(layout.gridLines||[]).filter(item=>item.viewId!==layoutSelected.id),
+      texts:layout.texts.filter(item=>item.viewId!==layoutSelected.id),
+      dimensions:layout.dimensions.filter(item=>item.viewId!==layoutSelected.id)}
+    :layoutSelected.kind==='grid'
+    ?{...layout,gridLines:(layout.gridLines||[]).filter(item=>item.id!==layoutSelected.id),
+      dimensions:layout.dimensions.filter(item=>item.gridA!==layoutSelected.id&&item.gridB!==layoutSelected.id)}
+    :layoutSelected.kind==='dimension'
+    ?{...layout,dimensions:layout.dimensions.filter(item=>item.id!==layoutSelected.id)}
     :{...layout,texts:layout.texts.filter(item=>item.id!==layoutSelected.id)};
   layoutSelected=null;$('#layout-selection').hidden=true;saveSheetLayout(next);
 };
