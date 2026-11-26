@@ -8,7 +8,7 @@ use std::{
     collections::HashMap,
     env, fs,
     io::{self, BufRead, BufReader, Read, Write},
-    net::{TcpListener, TcpStream},
+    net::{IpAddr, TcpListener, TcpStream},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread,
@@ -22,6 +22,7 @@ const HTML: &str = include_str!("../web/index.html");
 const CSS: &str = include_str!("../web/studio.css");
 const JS: &str = include_str!("../web/studio.js");
 const LINE_GEOMETRY: &str = include_str!("../web/line-geometry.js");
+const CAD_EXPORT: &str = include_str!("../web/cad-export.js");
 const LOGO: &[u8] = include_bytes!("../web/qreasee-logo.png");
 const LOGO_BLACK: &[u8] = include_bytes!("../web/qreasee-logo-black.png");
 
@@ -58,6 +59,7 @@ struct Studio {
     // The map lock protects room lookup only. Each room has its own lock so
     // geometry work and durable writes in one project do not block the others.
     rooms: Mutex<HashMap<Uuid, Arc<Mutex<Room>>>>,
+    limits: Mutex<HashMap<IpAddr, (Instant, u32)>>,
 }
 
 #[derive(Deserialize)]
@@ -76,6 +78,7 @@ fn main() -> io::Result<()> {
     let studio = Arc::new(Studio {
         directory,
         rooms: Mutex::new(HashMap::new()),
+        limits: Mutex::new(HashMap::new()),
     });
     let listener = TcpListener::bind(&address)?;
     println!("Qreasee · http://{}", listener.local_addr()?);
@@ -119,6 +122,17 @@ fn line(reader: &mut impl BufRead, limit: usize) -> io::Result<String> {
 }
 
 fn serve(mut stream: TcpStream, studio: &Studio) -> io::Result<()> {
+    let allowed = stream
+        .peer_addr()
+        .map(|peer| studio.allow(peer.ip()))
+        .unwrap_or(false);
+    if !allowed {
+        return reject(
+            &mut stream,
+            "429 Too Many Requests",
+            "Terlalu banyak permintaan. Coba lagi sebentar.",
+        );
+    }
     stream.set_read_timeout(Some(Duration::from_secs(4)))?;
     stream.set_write_timeout(Some(Duration::from_secs(4)))?;
     let mut reader = BufReader::new(&mut stream);
@@ -211,6 +225,12 @@ fn serve(mut stream: TcpStream, studio: &Studio) -> io::Result<()> {
             "text/javascript; charset=utf-8",
             LINE_GEOMETRY.as_bytes(),
         ),
+        ("GET", "/cad-export.js") => respond(
+            &mut stream,
+            "200 OK",
+            "text/javascript; charset=utf-8",
+            CAD_EXPORT.as_bytes(),
+        ),
         ("GET", "/qreasee-logo.png") => respond(
             &mut stream,
             "200 OK",
@@ -261,6 +281,23 @@ fn serve(mut stream: TcpStream, studio: &Studio) -> io::Result<()> {
 }
 
 impl Studio {
+    fn allow(&self, address: IpAddr) -> bool {
+        const WINDOW: Duration = Duration::from_secs(10);
+        const LIMIT: u32 = 240;
+        let Ok(mut limits) = self.limits.lock() else {
+            return false;
+        };
+        let now = Instant::now();
+        limits.retain(|_, (start, _)| now.duration_since(*start) < WINDOW);
+        let entry = limits.entry(address).or_insert((now, 0));
+        if entry.1 >= LIMIT {
+            false
+        } else {
+            entry.1 += 1;
+            true
+        }
+    }
+
     fn exchange(&self, id: Uuid, request: RequestData) -> io::Result<(&'static str, Value)> {
         let room_state = {
             let mut rooms = self
@@ -440,7 +477,7 @@ fn respond(
 ) -> io::Result<()> {
     write!(
         stream,
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'\r\n\r\n",
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nX-Permitted-Cross-Domain-Policies: none\r\nReferrer-Policy: no-referrer\r\nPermissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()\r\nCross-Origin-Opener-Policy: same-origin\r\nCross-Origin-Resource-Policy: same-origin\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'\r\n\r\n",
         body.len(),
     )?;
     stream.write_all(body)

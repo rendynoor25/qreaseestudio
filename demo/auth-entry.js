@@ -9,6 +9,7 @@ const gate = document.querySelector('#auth-gate');
 const message = document.querySelector('#auth-message');
 const login = document.querySelector('#google-login');
 const pendingRoomKey = 'qreasee-auth-pending-room';
+const roomHashPattern = /^#[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 let currentUser = null;
 
 function showAccount(user) {
@@ -19,7 +20,7 @@ function showAccount(user) {
 login.onclick = async () => {
   login.disabled = true;
   message.textContent = 'Membuka Google…';
-  if (location.hash) sessionStorage.setItem(pendingRoomKey, location.hash);
+  if (roomHashPattern.test(location.hash)) sessionStorage.setItem(pendingRoomKey, location.hash);
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'google', options: { redirectTo: location.origin + location.pathname }
   });
@@ -35,9 +36,9 @@ const ready = (async () => {
       'Gunakan akun Google untuk membuka proyek.';
     return null;
   }
-  const pending = sessionStorage.getItem(pendingRoomKey);
-  const roomHash = /^#[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(location.hash)
-    ? location.hash : pending || '';
+  const stored = sessionStorage.getItem(pendingRoomKey);
+  const pending = stored && roomHashPattern.test(stored) ? stored : '';
+  const roomHash = roomHashPattern.test(location.hash) ? location.hash : pending;
   if (pending || location.search) {
     history.replaceState(null, '', location.pathname + roomHash);
   }
@@ -51,12 +52,19 @@ const ready = (async () => {
 window.qreaseeAuth = {
   ready,
   get userId() { return currentUser?.id || ''; },
-  get recentProjects() { return currentUser?.user_metadata?.qreasee_recent_projects || []; },
+  get recentProjects() {
+    const projects=currentUser?.user_metadata?.qreasee_recent_projects;
+    return Array.isArray(projects)?projects:[];
+  },
   async rememberProject(project) {
     await ready;
+    if (!project || !roomHashPattern.test('#'+project.id)) return;
+    const safeProject={id:project.id,title:String(project.title||'Proyek tanpa judul').slice(0,80),
+      updatedAt:Number(project.updatedAt)||Date.now()};
     const current = Array.isArray(currentUser?.user_metadata?.qreasee_recent_projects)
-      ? currentUser.user_metadata.qreasee_recent_projects : [];
-    const recent = [project, ...current.filter(item => item.id !== project.id)].slice(0, 30);
+      ? currentUser.user_metadata.qreasee_recent_projects.filter(item =>
+        item && roomHashPattern.test('#'+item.id)) : [];
+    const recent = [safeProject, ...current.filter(item => item.id !== safeProject.id)].slice(0, 30);
     const { data, error } = await supabase.auth.updateUser({ data: { qreasee_recent_projects: recent } });
     if (!error && data.user) currentUser = data.user;
   },
