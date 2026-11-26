@@ -13,6 +13,7 @@ document.querySelector('#copy-link').disabled = true;
 const demoCopy = value => JSON.parse(JSON.stringify(value));
 const demoKey = room => 'qreasee-demo-room:' + room;
 let demoSeed;
+const demoMeshCache=new Map();
 
 async function seedDocument() {
   if (!demoSeed) {
@@ -25,31 +26,45 @@ async function seedDocument() {
 }
 
 function demoMeshes(document) {
-  const meshes = document.objects.map(object => previewMesh(object));
+  const live=new Set(document.objects.map(object=>object.id));
+  for(const id of demoMeshCache.keys()) if(!live.has(id)) demoMeshCache.delete(id);
+  const meshes = document.objects.map(object => {
+    const signature=JSON.stringify(object);
+    const cached=demoMeshCache.get(object.id);
+    if(cached?.signature===signature) return cached.mesh;
+    const mesh=previewMesh(object);
+    demoMeshCache.set(object.id,{signature,mesh,plan:null,cutHeight:null});
+    return mesh;
+  });
   const plans = document.objects.map((object, index) => {
+    const cached=demoMeshCache.get(object.id);
+    if(cached.plan && cached.cutHeight===document.sheet.cut_height) return cached.plan;
+    let plan;
     if (object.plane_u) {
       const mesh=demoCopy(meshes[index]);
-      return mesh.vertices.every(point=>point[2]>document.sheet.cut_height)
+      plan=mesh.vertices.every(point=>point[2]>document.sheet.cut_height)
         ?{vertices:[],faces:[],cut:false}:mesh;
-    }
-    if (object.wall_axis) {
+    } else if (object.wall_axis) {
       const mesh=demoCopy(meshes[index]);
       const cut=document.sheet.cut_height;
-      if (object.z-object.depth/2>cut) return {vertices:[],faces:[],cut:false};
-      if (object.z+object.depth/2>cut) {
+      if (object.z-object.depth/2>cut) plan={vertices:[],faces:[],cut:false};
+      else if (object.z+object.depth/2>cut) {
         const angle=object.rotation*Math.PI/180,cos=Math.cos(angle),sin=Math.sin(angle);
         const [ax,ay]=object.wall_axis,u=[ax*cos-ay*sin,ax*sin+ay*cos],n=[u[1],-u[0]];
-        return {vertices:[-object.width/2,object.width/2].map(along=>
+        plan={vertices:[-object.width/2,object.width/2].map(along=>
           [object.x+along*u[0]+object.height*n[0]/2,
             object.y+along*u[1]+object.height*n[1]/2,cut]),faces:[],cut:true};
-      }
-      return mesh;
+      } else plan=mesh;
+    } else if (object.z > document.sheet.cut_height) plan={ vertices: [], faces: [], cut: false };
+    else {
+      const mesh = demoCopy(meshes[index]);
+      mesh.cut = object.height > 0 && object.z + object.height > document.sheet.cut_height;
+      if (mesh.cut) mesh.vertices.forEach(vertex => { vertex[2] = Math.min(vertex[2], document.sheet.cut_height); });
+      plan=mesh;
     }
-    if (object.z > document.sheet.cut_height) return { vertices: [], faces: [], cut: false };
-    const mesh = demoCopy(meshes[index]);
-    mesh.cut = object.height > 0 && object.z + object.height > document.sheet.cut_height;
-    if (mesh.cut) mesh.vertices.forEach(vertex => { vertex[2] = Math.min(vertex[2], document.sheet.cut_height); });
-    return mesh;
+    cached.plan=plan;
+    cached.cutHeight=document.sheet.cut_height;
+    return plan;
   });
   return { meshes, plans };
 }
