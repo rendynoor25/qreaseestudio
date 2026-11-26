@@ -321,24 +321,38 @@ impl Studio {
         let mut error = None;
         let mut topology = None;
         if let Some(edit) = request.edit {
-            let mut next = room.document.clone();
-            match apply(&mut next, edit) {
-                Ok(faces) => {
-                    if save(&self.directory, id, &next).is_ok() {
-                        room.document = next;
-                        topology = Some(faces);
-                    } else {
-                        status = "500 Internal Server Error";
-                        error = Some("Revisi gagal disimpan.");
+            let share_edit = matches!(&edit, Edit::Share { .. });
+            let comment_edit = matches!(&edit, Edit::Comment { .. });
+            let role = room.document.share.role.as_str();
+            let denied = !share_edit
+                && (role == "view" || (role == "comment" && !comment_edit));
+            if denied {
+                status = "403 Forbidden";
+                error = Some(if role == "comment" {
+                    "Akses ini hanya dapat menambah atau menghapus komentar."
+                } else {
+                    "Akses ini hanya dapat melihat proyek."
+                });
+            } else {
+                let mut next = room.document.clone();
+                match apply(&mut next, edit) {
+                    Ok(faces) => {
+                        if save(&self.directory, id, &next).is_ok() {
+                            room.document = next;
+                            topology = Some(faces);
+                        } else {
+                            status = "500 Internal Server Error";
+                            error = Some("Revisi gagal disimpan.");
+                        }
                     }
-                }
-                Err("conflict") => {
-                    status = "409 Conflict";
-                    error = Some("Objek atau lembar ini sudah diubah di sesi lain.");
-                }
-                Err(message) => {
-                    status = "422 Unprocessable Content";
-                    error = Some(message);
+                    Err("conflict") => {
+                        status = "409 Conflict";
+                        error = Some("Objek atau lembar ini sudah diubah di sesi lain.");
+                    }
+                    Err(message) => {
+                        status = "422 Unprocessable Content";
+                        error = Some(message);
+                    }
                 }
             }
         }
@@ -354,7 +368,9 @@ impl Studio {
         });
         Ok((
             status,
-            json!({ "changes": changes, "peers": peers, "error": error, "topology": topology }),
+            json!({ "changes": changes, "peers": peers, "error": error,
+                "topology": topology, "can_manage": true,
+                "role": room.document.share.role.clone() }),
         ))
     }
 }

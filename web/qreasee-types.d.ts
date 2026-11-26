@@ -52,6 +52,15 @@ interface QreaseeSheet {
   scale: number;
   notes: string;
   cut_height: number;
+  room_title?: string;
+  drawn_by?: string;
+  checked_by?: string;
+  issue_date?: string;
+  layout?: {
+    views: Array<{id:string; mode:'plan'|'front'|'right'|'iso'; x:number; y:number; w:number; h:number; title:string; grid?:boolean}>;
+    texts: Array<{id:string; x:number; y:number; text:string; size:number}>;
+    dimensions: Array<{id:string; viewId:string; a:QreaseePoint2; b:QreaseePoint2}>;
+  };
 }
 
 interface QreaseeComment {
@@ -61,6 +70,12 @@ interface QreaseeComment {
   text: string;
   created_at: number;
   mentions?: string[];
+  parent?: string;
+  resolved?: boolean;
+}
+
+interface QreaseeShare {
+  role: 'edit' | 'comment' | 'view';
 }
 
 interface QreaseeDocument {
@@ -68,6 +83,7 @@ interface QreaseeDocument {
   objects: QreaseeObject[];
   sheet: QreaseeSheet;
   comments?: QreaseeComment[];
+  share?: QreaseeShare;
   faces_initialized?: boolean;
 }
 
@@ -103,7 +119,13 @@ interface QreaseeCommentEdit {
   after?: QreaseeComment | null;
 }
 
-type QreaseeEdit = QreaseeObjectEdit | QreaseeBatchEdit | QreaseeSheetEdit | QreaseeCommentEdit;
+interface QreaseeShareEdit {
+  type: 'share';
+  before: QreaseeShare;
+  after: QreaseeShare;
+}
+
+type QreaseeEdit = QreaseeObjectEdit | QreaseeBatchEdit | QreaseeSheetEdit | QreaseeCommentEdit | QreaseeShareEdit;
 
 interface QreaseeChangeSet {
   document: QreaseeDocument;
@@ -139,6 +161,8 @@ interface QreaseeResponse {
   changes?: QreaseeChangeSet | null;
   peers?: QreaseePeer[];
   error?: string | null;
+  can_manage?: boolean;
+  role?: 'edit' | 'comment' | 'view';
   topology?: QreaseeFaceChanges | null;
   room?: string;
 }
@@ -216,6 +240,8 @@ interface QreaseeState {
   polling: boolean;
   peers: QreaseePeer[];
   cursor: QreaseeCursor | null;
+  canManageShare: boolean;
+  shareRole: 'edit' | 'comment' | 'view';
 }
 
 interface QreaseeCloudConfig {

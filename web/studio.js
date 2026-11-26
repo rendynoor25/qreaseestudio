@@ -83,7 +83,7 @@ const state = {
   doc: null, meshes: [], plans: [], selected: new Set(), inside: null, tool: 'select', layout: false, busy: false,
   snapping: true, inference: null,
   undo: [], redo: [], drag: null, arcPending:null, linePending:null, linePress:null, drawPending:null,
-  movePending:null, rotatePending:null, offsetPending:null, measurePending:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null
+  movePending:null, rotatePending:null, offsetPending:null, measurePending:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null, canManageShare:true, shareRole:'edit'
 };
 const canvas = $('#viewport');
 const ctx = canvas.getContext('2d');
@@ -164,6 +164,10 @@ for (const [id, [label, key]] of Object.entries(tools)) {
 }
 
 function setTool(tool) {
+  if (!canEditModel() && !['select','orbit','pan','measure'].includes(tool)) {
+    showStatus('Akses Anda '+shareRoleLabel(shareRole()).toLowerCase()+'; alat gambar dinonaktifkan.');
+    return;
+  }
   if (state.tool!==tool) {
     state.arcPending=null;
     state.linePending=null;
@@ -506,8 +510,16 @@ function mode(layout) {
   $('#inspector-title').textContent = layout ? 'Pengaturan lembar' : 'Properti objek';
   $('#print').hidden = !layout;
   $('#fit').hidden = layout;
-  if (layout) drawSheet();
-  else redraw();
+  if (layout) {
+    $('#layout-side-properties').append($('#sheet-form'));
+    $('#inspector').hidden=true;
+    $('#workspace').classList.remove('inspector-open');
+    $('#inspector-toggle').setAttribute('aria-expanded','false');
+    drawSheet();
+  } else {
+    $('#layout-inspector').append($('#sheet-form'));
+    redraw();
+  }
 }
 $('#model-tab').onclick = () => mode(false);
 $('#layout-tab').onclick = () => mode(true);
@@ -660,11 +672,14 @@ async function openRoom(createBlank) {
 }
 
 function accept(data) {
+  if (typeof data.can_manage === 'boolean') state.canManageShare=data.can_manage;
+  if (typeof data.role === 'string') state.shareRole=data.role;
   const update = data.changes;
   if (update && (!state.doc || update.document.revision >= state.doc.revision)) {
     const first = !state.doc;
     const oldTitle=state.doc?.sheet.title;
     state.doc = update.document;
+    if (typeof data.role !== 'string') state.shareRole=state.doc.share?.role || 'edit';
     state.meshes = update.meshes;
     state.plans = update.plans;
     if (first) {
@@ -687,6 +702,7 @@ function accept(data) {
   const others=peers.filter(peer=>peer.id!==state.client).sort((a,b)=>a.id.localeCompare(b.id));
   const cursorChanged=JSON.stringify(state.peers)!==JSON.stringify(others);
   state.peers=others;
+  if ($('#share-dialog').open) renderShareDialog();
   connection(true, window.qreaseeCloudPost ? peers.length + ' online' :
     window.qreaseeDemoPost ? 'Lokal' : peers.length + ' online');
   if (cursorChanged) {
@@ -861,11 +877,20 @@ function reverse(redo) {
 }
 
 function refreshButtons() {
-  $('#undo').disabled = state.busy || !state.undo.length;
-  $('#redo').disabled = state.busy || !state.redo.length;
+  const editable=canEditModel(), comment=canComment();
+  $('#undo').disabled = state.busy || !editable || !state.undo.length;
+  $('#redo').disabled = state.busy || !editable || !state.redo.length;
   for (const id of ['copy-container','explode-container','remove-container','duplicate','delete']) {
-    $('#'+id).disabled=state.busy;
+    $('#'+id).disabled=state.busy || !editable;
   }
+  for (const button of document.querySelectorAll('#tool-buttons .icon-button')) {
+    const tool=/** @type {HTMLElement} */ (button).dataset.tool;
+    /** @type {HTMLButtonElement} */ (button).disabled=!editable &&
+      !['select','orbit','pan','measure'].includes(tool||'');
+  }
+  $('#comment-send').disabled=state.busy || !comment;
+  $('#comment-text').disabled=!comment;
+  $('#object-menu-comment').disabled=!comment;
 }
 
 function refresh(force = false) {
@@ -913,18 +938,99 @@ function refresh(force = false) {
       objectBaseline = object;
       form.dataset.dirty = '';
     }
+    const editable=canEditModel();
+    form.querySelectorAll('input,select,button').forEach(
+      /** @param {HTMLInputElement|HTMLSelectElement|HTMLButtonElement} element */ element => {
+      element.disabled=!editable;
+    });
   } else objectBaseline = null;
   const sheetForm = $('#sheet-form');
   if (doc && (force || sheetForm.dataset.dirty !== 'yes')) {
+    for (const key of ['room_title','drawn_by','checked_by','issue_date']) sheetForm.elements.namedItem(key).value=doc.sheet[key] || '';
     Object.entries(doc.sheet).forEach(([key,value]) => {
-      sheetForm.elements.namedItem(key).value = key==='cut_height' ? displayLength(value) : value;
+      const input=sheetForm.elements.namedItem(key);
+      if (input) input.value = key==='cut_height' ? displayLength(value) : value;
     });
     sheetBaseline = doc.sheet;
     sheetForm.dataset.dirty = '';
   }
+  const editable=canEditModel();
+  sheetForm.querySelectorAll('input,select,textarea,button').forEach(
+    /** @param {HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement|HTMLButtonElement} element */ element => {
+    element.disabled=!editable;
+  });
+  applyAccessUi();
   renderComments();
   if (state.layout) drawSheet();
   else redraw();
+}
+
+function shareLinkRole() {
+  const role=state.doc?.share?.role;
+  return role==='comment'||role==='view'?role:'edit';
+}
+function shareRole() { return state.shareRole || shareLinkRole(); }
+function canEditModel() { return shareRole()==='edit'; }
+function canComment() { return shareRole()!=='view'; }
+function shareRoleLabel(role) {
+  return role==='comment'?'Dapat berkomentar':role==='view'?'Hanya melihat':'Dapat mengedit';
+}
+
+function applyAccessUi() {
+  const role=shareRole();
+  const badge=$('#access-badge');
+  badge.hidden=role==='edit';
+  if (!badge.hidden) {
+    badge.textContent=shareRoleLabel(role);
+    badge.dataset.role=role;
+  }
+  if (!canEditModel() && !['select','orbit','pan','measure'].includes(state.tool)) {
+    state.drag=null;
+    state.linePress=null;
+    setTool('select');
+    redraw();
+  }
+  if (!canComment() && !$('#comment-composer').hidden) closeCommentComposer();
+  if ($('#share-dialog').open) renderShareDialog();
+}
+
+function renderShareDialog() {
+  $('#display-name').value=state.name;
+  $('#share-link').value=location.href;
+  $('#share-role').value=shareLinkRole();
+  $('#share-role').disabled=!state.canManageShare || state.busy;
+  $('#share-role-hint').textContent=state.canManageShare
+    ? 'Pemilik proyek tetap dapat mengedit. Pilih akses untuk siapa pun yang membuka tautan.'
+    : 'Hanya pemilik proyek yang dapat mengubah akses. Anda: '+shareRoleLabel(shareRole())+'.';
+  const people=$('#share-people');
+  people.replaceChildren();
+  const addPerson=(name,role,owner)=>{
+    const row=document.createElement('div');row.className='share-person';
+    const avatar=document.createElement('span');avatar.className='comment-avatar';
+    avatar.textContent=commentInitials(name);
+    const info=document.createElement('div');info.className='share-person-info';
+    const label=document.createElement('strong');label.textContent=name;
+    const kind=document.createElement('small');kind.textContent=owner?'Akses penuh':'Peserta aktif';
+    info.append(label,kind);
+    const badge=document.createElement('span');badge.className='share-person-role';
+    badge.textContent=owner?'Pemilik':shareRoleLabel(role);
+    row.append(avatar,info,badge);
+    people.append(row);
+  };
+  addPerson((window.qreaseeAuth?.displayName || state.name)+' (Anda)',shareRole(),state.canManageShare);
+  for (const peer of state.peers) {
+    addPerson(peer.name||'Tamu',state.canManageShare?shareLinkRole():shareRole(),
+      false);
+  }
+}
+
+async function changeShareRole(role) {
+  if (!state.canManageShare) {renderShareDialog();return;}
+  const before=state.doc?.share || {role:'edit'};
+  if (before.role===role) return;
+  const saved=await commit({type:'share',before,after:{role}});
+  if (saved) showStatus('Akses tautan: '+shareRoleLabel(role)+'.');
+  else renderShareDialog();
 }
 
 const comments = () => state.doc?.comments || [];
@@ -935,6 +1041,8 @@ let activeCommentTarget = null;
 /** @type {string|null} */
 let commentComposerTarget = null;
 let commentComposerPoint = null;
+/** @type {QreaseeComment|null} */
+let commentComposerReplyTo = null;
 /** @type {Set<string>} */
 const commentDraftMentions = new Set();
 /** @type {string|null} */
@@ -964,9 +1072,10 @@ function commentTargetExists(id) {
 
 function updateCommentBadge() {
   const button=$('#comments-toggle');
-  const count=comments().length;
+  const all=comments();
+  const count=all.filter(comment=>!comment.parent && !comment.resolved).length;
   button.dataset.count=count?String(count):'';
-  button.title=count?'Komentar ('+count+')':'Komentar';
+  button.title=count?'Komentar ('+count+' belum selesai)':'Komentar';
 }
 
 /** @param {HTMLElement} element @param {QreaseeComment} comment */
@@ -1005,7 +1114,10 @@ function renderComments() {
   const list=$('#comment-list');
   if (!list) return;
   list.replaceChildren();
-  const items=[...comments()].sort((a,b)=>b.created_at-a.created_at);
+  const all=comments();
+  const items=all.filter(comment=>!comment.parent || !all.some(item=>item.id===comment.parent))
+    .sort((a,b)=>Number(Boolean(a.resolved))-Number(Boolean(b.resolved)) ||
+      b.created_at-a.created_at);
   if (!items.length) {
     const empty=document.createElement('div');
     empty.className='comment-empty';
@@ -1013,9 +1125,11 @@ function renderComments() {
     list.append(empty);
     return;
   }
-  for (const comment of items) {
+  const buildCard=(comment,parent)=>{
     const card=document.createElement('article');
-    card.className='comment-card'+(activeCommentTarget===comment.target?' active':'');
+    card.className='comment-card'+(parent?' comment-reply':'')+
+      (comment.resolved?' resolved':'')+
+      (!parent && activeCommentTarget===comment.target?' active':'');
     card.dataset.target=comment.target;
     const head=document.createElement('div');head.className='comment-card-head';
     const avatar=document.createElement('span');avatar.className='comment-avatar';
@@ -1024,20 +1138,56 @@ function renderComments() {
     const author=document.createElement('strong');author.textContent=comment.author;
     const time=document.createElement('small');time.textContent=commentTime(comment.created_at);
     meta.append(author,time);
-    const target=document.createElement('button');target.type='button';target.className='comment-target';
-    target.textContent=commentTargetName(comment.target);
-    target.title='Pilih '+commentTargetName(comment.target);
-    target.onclick=event=>{event.stopPropagation();focusCommentTarget(comment.target);};
-    head.append(avatar,meta,target);
+    head.append(avatar,meta);
+    if (parent) {
+      const tag=document.createElement('span');tag.className='comment-reply-tag';tag.textContent='Balasan';
+      head.append(tag);
+    } else {
+      const target=document.createElement('button');target.type='button';target.className='comment-target';
+      target.textContent=commentTargetName(comment.target);
+      target.title='Pilih '+commentTargetName(comment.target);
+      target.onclick=event=>{event.stopPropagation();focusCommentTarget(comment.target);};
+      head.append(target);
+    }
     const text=document.createElement('div');text.className='comment-text';
     renderCommentText(text,comment);
+    card.append(head,text);
+    if (comment.resolved) {
+      const done=document.createElement('span');done.className='comment-resolved-tag';
+      done.textContent='Selesai';
+      card.append(done);
+    }
     const foot=document.createElement('div');foot.className='comment-card-foot';
+    if (!parent) {
+      const reply=document.createElement('button');reply.type='button';reply.className='comment-action';
+      reply.textContent='Balas';
+      reply.disabled=!canComment();
+      reply.onclick=event=>{event.stopPropagation();
+        openCommentComposer(comment.target,event.clientX,event.clientY,comment);};
+      const resolve=document.createElement('button');resolve.type='button';resolve.className='comment-action';
+      resolve.textContent=comment.resolved?'Buka lagi':'Selesaikan';
+      resolve.disabled=!canComment();
+      resolve.onclick=event=>{event.stopPropagation();toggleCommentResolved(comment);};
+      foot.append(reply,resolve);
+    }
     const remove=document.createElement('button');remove.type='button';remove.className='comment-delete';
     remove.textContent='Hapus';
+    remove.disabled=!canComment();
     remove.onclick=event=>{event.stopPropagation();deleteComment(comment);};
     foot.append(remove);
-    card.append(head,text,foot);
+    card.append(foot);
     card.onclick=()=>focusCommentTarget(comment.target);
+    return card;
+  };
+  for (const comment of items) {
+    const card=buildCard(comment,false);
+    const replies=all.filter(item=>item.parent===comment.id)
+      .sort((a,b)=>a.created_at-b.created_at);
+    if (replies.length) {
+      const thread=document.createElement('div');thread.className='comment-replies';
+      for (const reply of replies) thread.append(buildCard(reply,true));
+      card.append(thread);
+    }
     list.append(card);
   }
   if (activeCommentTarget) scrollToCommentTarget(activeCommentTarget);
@@ -1077,17 +1227,22 @@ function positionCommentComposer(clientX,clientY) {
   composer.style.top=top+'px';
 }
 
-/** @param {string} target @param {number=} clientX @param {number=} clientY */
-function openCommentComposer(target,clientX,clientY) {
+/** @param {string} target @param {number=} clientX @param {number=} clientY @param {QreaseeComment=} replyTo */
+function openCommentComposer(target,clientX,clientY,replyTo) {
+  if (!canComment()) {showStatus('Akses ini hanya dapat melihat proyek.');return;}
   if (!commentTargetExists(target)) {showStatus('Objek target sudah tidak ada.');return;}
   commentComposerTarget=target;
+  commentComposerReplyTo=replyTo || null;
   commentComposerPoint={x:clientX??canvas.getBoundingClientRect().left+80,
     y:clientY??canvas.getBoundingClientRect().top+120};
   activeCommentTarget=target;
   commentDraftMentions.clear();
   $('#comment-text').value='';
   $('#comment-compose-status').textContent='';
-  $('#comment-target-name').textContent=commentTargetName(target);
+  $('#comment-composer-title').textContent=commentComposerReplyTo?'Balas komentar':'Tambah komentar';
+  $('#comment-target-name').textContent=commentComposerReplyTo
+    ? 'Untuk '+commentTargetName(target)+' · balasan untuk '+commentComposerReplyTo.author
+    : commentTargetName(target);
   $('#comment-mentions').hidden=true;
   $('#comment-mentions').replaceChildren();
   const composer=$('#comment-composer');
@@ -1105,6 +1260,7 @@ function closeCommentComposer() {
   $('#comment-text').value='';
   $('#comment-compose-status').textContent='';
   commentComposerTarget=null;
+  commentComposerReplyTo=null;
   commentDraftMentions.clear();
 }
 
@@ -1173,6 +1329,7 @@ function insertCommentMention(name) {
 }
 
 async function submitComment() {
+  if (!canComment()) {showStatus('Akses ini hanya dapat melihat proyek.');return;}
   const input=$('#comment-text');
   const text=input.value.trim();
   if (!text) {$('#comment-compose-status').textContent='Tulis komentar terlebih dahulu.';return;}
@@ -1189,7 +1346,8 @@ async function submitComment() {
   const saved=await commit({
     type:'comment',before:null,
     after:{id:identity(),target:commentComposerTarget,author:state.name,text:text.slice(0,1000),
-      created_at:Date.now(),mentions}
+      created_at:Date.now(),mentions,
+      ...(commentComposerReplyTo?{parent:commentComposerReplyTo.id}:{})}
   });
   button.disabled=false;
   if (saved) {
@@ -1200,9 +1358,19 @@ async function submitComment() {
 
 /** @param {QreaseeComment} comment */
 async function deleteComment(comment) {
+  if (!canComment()) {showStatus('Akses ini hanya dapat melihat proyek.');return;}
   if (!window.confirm('Hapus komentar dari '+comment.author+'?')) return;
   const saved=await commit({type:'comment',before:comment,after:null});
   if (saved) showStatus('Komentar dihapus.');
+}
+
+/** @param {QreaseeComment} comment */
+async function toggleCommentResolved(comment) {
+  if (!canComment()) {showStatus('Akses ini hanya dapat melihat proyek.');return;}
+  const resolved=!comment.resolved;
+  const saved=await commit({type:'comment',before:comment,
+    after:{...comment,resolved}});
+  if (saved) showStatus(resolved?'Komentar ditandai selesai.':'Komentar dibuka lagi.');
 }
 
 /** @param {string} target @param {number} clientX @param {number} clientY */
@@ -1212,6 +1380,9 @@ function showObjectMenu(target,clientX,clientY) {
   const group=members(target);
   const kind=group.length?(group[0].container?.definition?'Component':'Group'):'Objek';
   $('#object-menu-title').textContent=kind+' · '+commentTargetName(target);
+  const commentButton=$('#object-menu-comment');
+  commentButton.disabled=!canComment();
+  commentButton.title=canComment()?'Tambah komentar':'Akses ini hanya dapat melihat proyek.';
   const menu=$('#object-menu');
   menu.hidden=false;
   const box=menu.getBoundingClientRect();
@@ -1242,8 +1413,10 @@ function commentTargetBox(target) {
 function drawCommentPins() {
   commentPins=[];
   const counts=new Map();
-  for (const comment of comments())
+  for (const comment of comments()) {
+    if (comment.parent || comment.resolved) continue;
     counts.set(comment.target,(counts.get(comment.target)||0)+1);
+  }
   if (!counts.size) return;
   ctx.save();
   ctx.font='bold 10px Segoe UI, sans-serif';
@@ -1442,6 +1615,7 @@ function deletionTargets() {
 }
 
 function removeObject() {
+  if (!canEditModel()) {showStatus('Akses ini hanya dapat '+shareRoleLabel(shareRole()).toLowerCase().replace('dapat ','')+'.');return;}
   if (!state.doc || state.busy || !state.selected.size) return;
   const targets=deletionTargets();
   if (!targets.length) return;
@@ -2210,7 +2384,7 @@ $('#sheet-form').onsubmit = event => {
   const values = /** @type {Record<string, any>} */ (Object.fromEntries(new FormData(event.currentTarget)));
   values.scale = Number(values.scale);
   values.cut_height = Number(values.cut_height)/unitFactors[displayUnit];
-  edit(sheetBaseline, values, 'sheet');
+  edit(sheetBaseline, {...sheetBaseline,...values}, 'sheet');
 };
 
 $('#new-project').onclick = () => { $('#file-menu').open = false; openRoom(true); };
@@ -2221,10 +2395,13 @@ $('#home-example').onclick = () => { $('#home-message').textContent='Membuka con
 $('#home-theme').onclick = () => $('#theme-toggle').click();
 $('#share').onclick = () => {
   if (!state.room) return;
-  $('#display-name').value = state.name;
-  $('#share-link').value = location.href;
+  renderShareDialog();
   $('#share-feedback').textContent = '';
   $('#share-dialog').showModal();
+};
+$('#share-role').onchange = event => {
+  /** @type {HTMLSelectElement} */ (event.target).blur();
+  changeShareRole(/** @type {HTMLSelectElement} */ (event.target).value);
 };
 $('#display-name').onchange = event => {
   state.name = event.target.value.trim() || 'Tamu';
@@ -3344,6 +3521,9 @@ canvas.addEventListener('pointerdown',event=>{
   if (state.drag || event.button > 2) return;
   const start=pointer(event);
   const tool=event.button === 1 ? (event.shiftKey?'pan':'orbit') : event.button === 2 ? 'pan' : state.tool;
+  if (!canEditModel() && !['select','orbit','pan','measure'].includes(tool)) {
+    showStatus('Akses ini tidak dapat mengubah model.');return;
+  }
   if (event.button===0 && tool==='select') {
     const pin=commentPinAt(start);
     if (pin) {focusCommentTarget(pin.target);return;}
@@ -3982,7 +4162,10 @@ window.addEventListener('keydown',event=>{
     setTool('select');redraw();return;
   }
   if (key==='F' && event.shiftKey) { event.preventDefault(); fit();return; }
-  if (key==='G' || key==='Q') { event.preventDefault();createContainer(key==='Q');return; }
+  if (key==='G' || key==='Q') {
+    if (!canEditModel()) {showStatus('Akses ini tidak dapat mengubah model.');return;}
+    event.preventDefault();createContainer(key==='Q');return;
+  }
   const tool=Object.entries(tools).find(([,value])=>value[1]===key);
   if (tool) setTool(tool[0]);
 });
@@ -3992,6 +4175,48 @@ new ResizeObserver(()=>{
   redraw();
 }).observe(canvas);
 
+const layoutDefaults=()=>({
+  views:[
+    {id:'base-plan',mode:'plan',x:14,y:14,w:222,h:130,title:'DENAH',grid:false},
+    {id:'base-iso',mode:'iso',x:242,y:14,w:164,h:130,title:'AKSONOMETRI',grid:false},
+    {id:'base-front',mode:'front',x:14,y:150,w:222,h:98,title:'TAMPAK DEPAN',grid:false},
+    {id:'base-right',mode:'right',x:242,y:150,w:164,h:98,title:'TAMPAK KANAN',grid:false}
+  ],texts:[],dimensions:[]
+});
+const sheetLayout=()=>state.doc?.sheet.layout || layoutDefaults();
+let layoutTool='select',layoutSelected=null,layoutDrag=null,layoutDimensionStart=null;
+let layoutZoom=1;
+function saveSheetLayout(layout) {
+  if (!state.doc || state.busy) return Promise.resolve(false);
+  return edit(state.doc.sheet,{...state.doc.sheet,layout},'sheet');
+}
+function sheetPoint(event) {
+  const matrix=$('#sheet').getScreenCTM();
+  if (!matrix) return null;
+  const point=new DOMPoint(event.clientX,event.clientY).matrixTransform(matrix.inverse());
+  return [point.x,point.y];
+}
+function layoutViewAt(point) {
+  return [...sheetLayout().views].reverse().find(view=>point[0]>=view.x && point[0]<=view.x+view.w &&
+    point[1]>=view.y && point[1]<=view.y+view.h);
+}
+function selectLayoutItem(kind,id) {
+  layoutSelected={kind,id};
+  const panel=$('#layout-selection');
+  panel.hidden=false;
+  const view=kind==='view'?sheetLayout().views.find(item=>item.id===id):null;
+  const item=kind==='text'?sheetLayout().texts.find(item=>item.id===id):null;
+  $('#layout-view-title-row').hidden=!view;
+  $('#layout-text-row').hidden=!item;
+  if(view) $('#layout-view-title').value=view.title;
+  if(item) $('#layout-text-value').value=item.text;
+  drawSheet();
+}
+function setLayoutTool(tool) {
+  layoutTool=tool;layoutDimensionStart=null;
+  $('#layout-stage').dataset.tool=tool;
+  document.querySelectorAll('.layout-tool').forEach(/** @param {HTMLElement} button */ button=>button.classList.toggle('active',button.dataset.layoutTool===tool));
+}
 
 function drawSheet() {
   const sheet = $('#sheet');
@@ -4001,26 +4226,39 @@ function drawSheet() {
   const add=(name,attrs,text)=>sheet.append(svg(name,attrs,text));
   add('rect',{x:9,y:9,width:402,height:279,fill:'none',stroke:'#33404c','stroke-width':.42});
   const text=(x,y,value,options={})=>add('text',{x,y,fill:'#23313b','font-family':'Segoe UI, Arial, sans-serif','font-size':3.2,...options},value);
-  /** @type {Array<{x: number, y: number, w: number, h: number, mode: QreaseeView, label: string, dimensions?: boolean}>} */
-  const viewports=[
-    {x:14,y:14,w:222,h:130,mode:'plan',label:'01  DENAH',dimensions:true},
-    {x:242,y:14,w:164,h:130,mode:'iso',label:'02  AKSONOMETRI'},
-    {x:14,y:150,w:222,h:98,mode:'front',label:'03  TAMPAK DEPAN'},
-    {x:242,y:150,w:164,h:98,mode:'right',label:'04  TAMPAK KANAN'}
-  ];
+  const layout=sheetLayout();
+  const viewports=layout.views.map(view=>layoutDrag?.kind==='view'&&layoutDrag.id===view.id
+    ?{...view,x:layoutDrag.x,y:layoutDrag.y}:view);
   let clipped=false;
   for (const view of viewports) {
-    const {x,y,w,h,mode,label,dimensions}=view;
+    const {id,x,y,w,h,mode}=view,dimensions=mode==='plan';
+    const frame=svg('g',{'data-view-id':id,class:layoutSelected?.kind==='view'&&layoutSelected.id===id?'layout-selected':''});
+    sheet.append(frame);
+    const addView=(name,attrs,value)=>frame.append(svg(name,attrs,value));
+    const viewText=(tx,ty,value,options={})=>addView('text',{x:tx,y:ty,fill:'#23313b','font-family':'Segoe UI, Arial, sans-serif','font-size':3.2,...options},value);
     const meshes=mode==='plan'?state.plans:state.meshes;
-    add('rect',{x,y,width:w,height:h,fill:'#fdfdfd',stroke:'#c1c9ce','stroke-width':.28});
-    const raw=basis(...views[mode]);
+    addView('rect',{x,y,width:w,height:h,fill:'#fdfdfd',stroke:'#c1c9ce','stroke-width':.28});
+    const raw=basis(views[mode][0],views[mode][1]);
     const points=meshes.flatMap(mesh=>mesh.vertices.map(raw));
     const clipId='clip-'+mode;
     const clip=svg('clipPath',{id:clipId});
     clip.append(svg('rect',{x:x+1,y:y+1,width:w-2,height:h-13}));
     sheet.append(clip);
     const drawing=svg('g',{'clip-path':'url(#'+clipId+')'});
-    sheet.append(drawing);
+    frame.append(drawing);
+    if(view.grid && mode!=='iso') {
+      const spacing=Math.max(18,Math.min(70,5000/settings.scale));
+      const grid=svg('g',{'clip-path':'url(#'+clipId+')',stroke:'#c4cfd4','stroke-width':.18});
+      for(let gx=x+spacing,i=0;gx<x+w-4;gx+=spacing,i++) {
+        grid.append(svg('line',{x1:gx,y1:y+3,x2:gx,y2:y+h-14}));
+        viewText(gx,y+5,String.fromCharCode(65+i),{'text-anchor':'middle','font-size':2.7,fill:'#58707d'});
+      }
+      for(let gy=y+spacing,i=1;gy<y+h-14;gy+=spacing,i++) {
+        grid.append(svg('line',{x1:x+3,y1:gy,x2:x+w-3,y2:gy}));
+        viewText(x+5,gy-1,String(i),{'font-size':2.7,fill:'#58707d'});
+      }
+      frame.insertBefore(grid,drawing);
+    }
     if(points.length) {
       const {min,max}=bounds(points);
       const spanX=Math.max(.05,max[0]-min[0]), spanY=Math.max(.05,max[1]-min[1]);
@@ -4044,26 +4282,39 @@ function drawSheet() {
       }
       if (dimensions && spanX*factor<=w-12 && spanY*factor<=usableH) {
         const start=convert(min), end=convert(max), dy=end[1]+7;
-        const line=(x1,y1,x2,y2)=>add('line',{x1,y1,x2,y2,stroke:'#566774','stroke-width':.22});
+        const line=(x1,y1,x2,y2)=>addView('line',{x1,y1,x2,y2,stroke:'#566774','stroke-width':.22});
         line(start[0],end[1]+1,start[0],dy+2);
         line(end[0],end[1]+1,end[0],dy+2);
         line(start[0],dy,end[0],dy);
         line(start[0]-1,dy+1,start[0]+1,dy-1);
         line(end[0]-1,dy+1,end[0]+1,dy-1);
-        text(center[0],dy-1.5,lengthLabel(max[0]-min[0]),{'text-anchor':'middle','font-size':2.9});
+        viewText(center[0],dy-1.5,lengthLabel(max[0]-min[0]),{'text-anchor':'middle','font-size':2.9});
       }
     }
-    const caption=mode==='plan'?label+'  /  POTONG '+lengthLabel(settings.cut_height):label;
-    text(x+3,y+h-5,caption,{'font-weight':700});
-    text(x+w-3,y+h-5,mode==='iso'?'TANPA SKALA':'1:'+settings.scale,{'text-anchor':'end',fill:'#52616d','font-size':2.9});
+    for(const dimension of layout.dimensions.filter(item=>item.viewId===id)) {
+      const [ax,ay]=dimension.a,[bx,by]=dimension.b;
+      const horizontal=Math.abs(bx-ax)>=Math.abs(by-ay);
+      const offset=6;
+      const a=[x+ax,y+ay],b=[x+bx,y+by];
+      const p1=horizontal?[a[0],a[1]+offset]:[a[0]+offset,a[1]];
+      const p2=horizontal?[b[0],a[1]+offset]:[a[0]+offset,b[1]];
+      for(const [s,e] of [[a,p1],[b,p2],[p1,p2]]) addView('line',{x1:s[0],y1:s[1],x2:e[0],y2:e[1],stroke:'#284c5e','stroke-width':.3});
+      for(const p of [p1,p2]) addView('circle',{cx:p[0],cy:p[1],r:.7,fill:'#284c5e'});
+      const metres=Math.hypot(bx-ax,by-ay)*settings.scale/1000;
+      viewText((p1[0]+p2[0])/2,(p1[1]+p2[1])/2-1.2,lengthLabel(metres),{'text-anchor':'middle','font-size':3,fill:'#284c5e'});
+    }
+    const caption=mode==='plan'?view.title+'  /  POTONG '+lengthLabel(settings.cut_height):view.title;
+    viewText(x+3,y+h-5,caption,{'font-weight':700});
+    viewText(x+w-3,y+h-5,mode==='iso'?'TANPA SKALA':'1:'+settings.scale,{'text-anchor':'end',fill:'#52616d','font-size':2.9});
   }
   add('line',{x1:9,y1:254,x2:411,y2:254,stroke:'#33404c','stroke-width':.42});
   add('line',{x1:310,y1:254,x2:310,y2:288,stroke:'#33404c','stroke-width':.42});
   add('line',{x1:367,y1:254,x2:367,y2:288,stroke:'#33404c','stroke-width':.42});
   text(15,261,'PROYEK',{'font-size':2.9,'font-weight':700,fill:'#52616d'});
   text(15,271,settings.title,{'font-size':5.5,'font-weight':700});
+  if(settings.room_title) text(15,278,settings.room_title,{'font-size':3.4,'font-weight':600});
   const noteWords=settings.notes.replace(/\s+/g,' ').trim().split(' ');
-  let noteLine='', noteY=279;
+  let noteLine='', noteY=284;
   for (const word of noteWords) {
     if ((noteLine+' '+word).length>135 && noteLine) {
       text(15,noteY,noteLine,{'font-size':2.8,fill:'#52616d'});
@@ -4075,15 +4326,32 @@ function drawSheet() {
   const noteClip=svg('clipPath',{id:'clip-notes'});
   noteClip.append(svg('rect',{x:15,y:275,width:289,height:12}));
   sheet.append(noteClip);
-  text(15,noteY,noteLine,{'font-size':2.8,fill:'#52616d','clip-path':'url(#clip-notes)'});
+  text(15,noteY,noteLine,{'font-size':2.5,fill:'#52616d','clip-path':'url(#clip-notes)'});
   text(315,261,'FORMAT / SKALA',{'font-size':2.9,'font-weight':700,fill:'#52616d'});
-  text(315,273,'A3  /  1:'+settings.scale,{'font-size':5});
+  text(315,269,'A3  /  1:'+settings.scale,{'font-size':4.5});
+  text(315,276,'DIGAMBAR  '+(settings.drawn_by||'—'),{'font-size':2.6});
+  text(315,282,'DIPERIKSA  '+(settings.checked_by||'—'),{'font-size':2.6});
   text(372,261,'NO. GAMBAR',{'font-size':2.9,'font-weight':700,fill:'#52616d'});
-  text(372,273,settings.number,{'font-size':4.6,'font-weight':700,'textLength':Math.min(33,Math.max(4,settings.number.length*2.8)),'lengthAdjust':'spacingAndGlyphs'});
+  text(372,272,settings.number,{'font-size':4.6,'font-weight':700,'textLength':Math.min(33,Math.max(4,settings.number.length*2.8)),'lengthAdjust':'spacingAndGlyphs'});
+  if(settings.issue_date) text(372,283,settings.issue_date,{'font-size':2.7,fill:'#52616d'});
+  for(const item of layout.texts) {
+    const draft=layoutDrag?.kind==='text'&&layoutDrag.id===item.id?layoutDrag:null;
+    const x=draft?.x??item.x,y=draft?.y??item.y;
+    const group=svg('g',{'data-text-id':item.id,class:layoutSelected?.kind==='text'&&layoutSelected.id===item.id?'layout-selected':''});
+    group.append(svg('rect',{x:x-1,y:y-item.size,width:Math.max(12,item.text.length*item.size*.55),height:item.size+2,fill:'transparent',stroke:layoutSelected?.id===item.id?'#ec8d35':'none','stroke-width':.5}));
+    group.append(svg('text',{x,y,fill:'#23313b','font-family':'Segoe UI, Arial, sans-serif','font-size':item.size},item.text));
+    sheet.append(group);
+  }
   $('#scale-note').textContent=clipped
     ? 'Ada tampilan yang terpotong. Gunakan penyebut skala yang lebih besar.'
     : 'Untuk menjaga skala, cetak A3 pada ukuran aktual (100%).';
   drawLayoutCursors();
+  if (!layoutDrag) {
+    const thumbnail=sheet.cloneNode(true);
+    thumbnail.id='sheet-mini';
+    thumbnail.querySelector('.remote-cursors')?.remove();
+    $('#layout-mini').replaceChildren(thumbnail);
+  }
 }
 
 function drawLayoutCursors() {
@@ -4102,11 +4370,153 @@ function drawLayoutCursors() {
 }
 
 $('#sheet').addEventListener('pointermove',event=>{
-  const rect=event.currentTarget.getBoundingClientRect();
-  state.cursor={mode:'layout',x:round((event.clientX-rect.left)*420/rect.width),
-    y:round((event.clientY-rect.top)*297/rect.height)};
+  const point=sheetPoint(event);
+  if (!point) return;
+  state.cursor={mode:'layout',x:round(point[0]),y:round(point[1])};
+  if (layoutDrag) {
+    const source=layoutDrag.kind==='view'?sheetLayout().views.find(item=>item.id===layoutDrag.id)
+      :sheetLayout().texts.find(item=>item.id===layoutDrag.id);
+    if (!source) return;
+    layoutDrag.x=source.x+point[0]-layoutDrag.start[0];
+    layoutDrag.y=source.y+point[1]-layoutDrag.start[1];
+    drawSheet();
+  }
 });
 $('#sheet').addEventListener('pointerleave',()=>{if (state.layout) state.cursor=null;});
+
+function addLayoutView(mode,point=[26,22]) {
+  if (!state.doc || sheetLayout().views.length>=24) return;
+  const names={plan:'DENAH',front:'TAMPAK DEPAN',right:'TAMPAK KANAN',iso:'AKSONOMETRI'};
+  const view={id:identity(),mode,x:clamp(point[0],9,291),y:clamp(point[1],9,172),w:120,h:80,
+    title:names[mode],grid:false};
+  const layout=sheetLayout();
+  saveSheetLayout({...layout,views:[...layout.views,view]}).then(saved=>{
+    if(saved) selectLayoutItem('view',view.id);
+  });
+}
+function layoutSnap(view,point) {
+  const meshes=view.mode==='plan'?state.plans:state.meshes;
+  const raw=basis(views[view.mode][0],views[view.mode][1]);
+  const projected=meshes.flatMap(mesh=>mesh.vertices.map(raw));
+  if (!projected.length) return [point[0]-view.x,point[1]-view.y];
+  const {min,max}=bounds(projected),spanX=Math.max(.05,max[0]-min[0]),spanY=Math.max(.05,max[1]-min[1]);
+  const usableH=view.h-(view.mode==='plan'?35:19),factor=1000/state.doc.sheet.scale;
+  const center=[view.x+view.w/2,view.y+7+usableH/2];
+  const candidates=projected.map(([a,b])=>[center[0]+(a-(min[0]+max[0])/2)*factor,
+    center[1]+(b-(min[1]+max[1])/2)*factor]);
+  const nearest=candidates.reduce((best,item)=>Math.hypot(item[0]-point[0],item[1]-point[1])<
+    Math.hypot(best[0]-point[0],best[1]-point[1])?item:best,point);
+  const snapPoint=Math.hypot(nearest[0]-point[0],nearest[1]-point[1])<5?nearest:point;
+  return [clamp(snapPoint[0]-view.x,0,view.w),clamp(snapPoint[1]-view.y,0,view.h)];
+}
+$('#sheet').addEventListener('pointerdown',event=>{
+  if (event.button!==0 || !state.doc) return;
+  const point=sheetPoint(event);
+  if (!point) return;
+  const view=layoutViewAt(point);
+  if(layoutTool==='text') {
+    const value=prompt('Teks pada lembar:');
+    if(value?.trim()) {
+      const layout=sheetLayout();
+      const item={id:identity(),x:clamp(point[0],9,411),y:clamp(point[1],9,288),text:value.trim().slice(0,150),size:4};
+      saveSheetLayout({...layout,texts:[...layout.texts,item]}).then(saved=>{
+        if(saved) selectLayoutItem('text',item.id);
+      });
+    }
+    setLayoutTool('select');return;
+  }
+  if(layoutTool==='grid') {
+    if (!view || view.mode==='iso') {showStatus('Grid tersedia pada denah dan tampak ortografis.');return;}
+    const layout=sheetLayout();
+    saveSheetLayout({...layout,views:layout.views.map(item=>item.id===view.id?{...item,grid:!item.grid}:item)});
+    setLayoutTool('select');return;
+  }
+  if(layoutTool==='dimension') {
+    if (!view || view.mode==='iso') {showStatus('Dimensi tersedia pada denah dan tampak ortografis.');return;}
+    const local=layoutSnap(view,point);
+    if(!layoutDimensionStart || layoutDimensionStart.viewId!==view.id) {
+      layoutDimensionStart={viewId:view.id,a:local};
+      showStatus('Klik titik kedua dimensi pada view yang sama.');
+    } else {
+      const start=layoutDimensionStart;
+      if(Math.hypot(local[0]-start.a[0],local[1]-start.a[1])>=2) {
+        const layout=sheetLayout();
+        saveSheetLayout({...layout,dimensions:[...layout.dimensions,{id:identity(),viewId:view.id,a:start.a,b:local}]});
+      }
+      setLayoutTool('select');
+    }
+    return;
+  }
+  const target=event.target.closest('[data-text-id],[data-view-id]');
+  const kind=target?.hasAttribute('data-text-id')?'text':target?.hasAttribute('data-view-id')?'view':null;
+  if(kind) {
+    const id=target.getAttribute(kind==='text'?'data-text-id':'data-view-id');
+    selectLayoutItem(kind,id);
+    const source=kind==='view'?sheetLayout().views.find(item=>item.id===id)
+      :sheetLayout().texts.find(item=>item.id===id);
+    layoutDrag={kind,id,start:point,x:source.x,y:source.y};
+    event.currentTarget.setPointerCapture(event.pointerId);
+  } else if(point[1]>=254) {
+    $('.layout-title-details').open=true;
+    $('.layout-title-details').scrollIntoView({block:'nearest'});
+  } else {layoutSelected=null;$('#layout-selection').hidden=true;drawSheet();}
+});
+$('#sheet').addEventListener('pointerup',event=>{
+  if (!layoutDrag) return;
+  const drag=layoutDrag;layoutDrag=null;
+  const source=drag.kind==='view'?sheetLayout().views.find(item=>item.id===drag.id)
+    :sheetLayout().texts.find(item=>item.id===drag.id);
+  if (!source) return;
+  const x=drag.kind==='view'?clamp(drag.x,9,411-source.w):clamp(drag.x,9,411);
+  const y=drag.kind==='view'?clamp(drag.y,9,252-source.h):clamp(drag.y,9,288);
+  if(Math.hypot(x-source.x,y-source.y)<.5){drawSheet();return;}
+  const layout=sheetLayout();
+  const key=drag.kind==='view'?'views':'texts';
+  saveSheetLayout({...layout,[key]:layout[key].map(item=>item.id===drag.id?{...item,x,y}:item)});
+});
+$('#sheet').addEventListener('pointercancel',()=>{layoutDrag=null;drawSheet();});
+document.querySelectorAll('.layout-tool').forEach(/** @param {HTMLElement} button */ button=>button.onclick=()=>setLayoutTool(button.dataset.layoutTool));
+$('#layout-zoom').onchange=event=>{
+  layoutZoom=Number(event.target.value);
+  $('#layout-stage').style.setProperty('--layout-sheet-width',(840*layoutZoom)+'px');
+};
+function stepLayoutZoom(direction) {
+  const levels=[.5,.75,1,1.25,1.5,2,3];
+  const index=levels.indexOf(layoutZoom);
+  $('#layout-zoom').value=String(levels[clamp(index+direction,0,levels.length-1)]);
+  $('#layout-zoom').dispatchEvent(new Event('change'));
+}
+$('#layout-zoom-out').onclick=()=>stepLayoutZoom(-1);
+$('#layout-zoom-in').onclick=()=>stepLayoutZoom(1);
+$('#layout-canvas').addEventListener('wheel',event=>{
+  if(!event.ctrlKey) return;
+  event.preventDefault();stepLayoutZoom(event.deltaY<0?1:-1);
+},{passive:false});
+$('#layout-mini').onclick=()=>{$('#layout-canvas').scrollTo({left:0,top:0,behavior:'smooth'});};
+document.querySelectorAll('[data-view-mode]').forEach(/** @param {HTMLElement} button */ button=>{
+  button.onclick=()=>addLayoutView(button.dataset.viewMode);
+  button.ondragstart=event=>event.dataTransfer.setData('text/qreasee-view',button.dataset.viewMode);
+});
+$('#sheet').ondragover=event=>{if(event.dataTransfer.types.includes('text/qreasee-view')) event.preventDefault();};
+$('#sheet').ondrop=event=>{event.preventDefault();const mode=event.dataTransfer.getData('text/qreasee-view');const point=sheetPoint(event);if(mode&&point)addLayoutView(mode,point);};
+$('#layout-view-title').onchange=event=>{
+  if(layoutSelected?.kind!=='view')return;
+  const layout=sheetLayout(),title=event.target.value.trim();if(!title)return;
+  saveSheetLayout({...layout,views:layout.views.map(item=>item.id===layoutSelected.id?{...item,title}:item)});
+};
+$('#layout-text-value').onchange=event=>{
+  if(layoutSelected?.kind!=='text')return;
+  const layout=sheetLayout(),value=event.target.value.trim();if(!value)return;
+  saveSheetLayout({...layout,texts:layout.texts.map(item=>item.id===layoutSelected.id?{...item,text:value}:item)});
+};
+$('#layout-delete').onclick=()=>{
+  if(!layoutSelected)return;
+  const layout=sheetLayout();
+  const next=layoutSelected.kind==='view'
+    ?{...layout,views:layout.views.filter(item=>item.id!==layoutSelected.id),dimensions:layout.dimensions.filter(item=>item.viewId!==layoutSelected.id)}
+    :{...layout,texts:layout.texts.filter(item=>item.id!==layoutSelected.id)};
+  layoutSelected=null;$('#layout-selection').hidden=true;saveSheetLayout(next);
+};
 
 window.addEventListener('hashchange',()=>roomFromHash()?openRoom():showProjectHome());
 let lastSync=0;

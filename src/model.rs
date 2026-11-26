@@ -404,6 +404,67 @@ fn default_cut_height() -> f64 {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SheetView {
+    pub id: String,
+    pub mode: String,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    pub title: String,
+    #[serde(default)]
+    pub grid: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SheetText {
+    pub id: String,
+    pub x: f64,
+    pub y: f64,
+    pub text: String,
+    pub size: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SheetDimension {
+    pub id: String,
+    #[serde(rename = "viewId")]
+    pub view_id: String,
+    pub a: [f64; 2],
+    pub b: [f64; 2],
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SheetLayout {
+    pub views: Vec<SheetView>,
+    pub texts: Vec<SheetText>,
+    pub dimensions: Vec<SheetDimension>,
+}
+
+impl SheetLayout {
+    fn valid(&self) -> bool {
+        self.views.len() <= 24 && self.texts.len() <= 100 && self.dimensions.len() <= 100
+            && self.views.iter().all(|view| {
+                !view.id.is_empty() && ["plan", "front", "right", "iso"].contains(&view.mode.as_str())
+                    && !view.title.trim().is_empty() && view.title.chars().count() <= 80
+                    && [view.x, view.y, view.w, view.h].iter().all(|v| v.is_finite())
+                    && view.x >= 9.0 && view.y >= 9.0 && view.w >= 30.0 && view.h >= 25.0
+                    && view.x + view.w <= 411.0 && view.y + view.h <= 252.0
+            })
+            && self.texts.iter().all(|item| {
+                !item.id.is_empty() && !item.text.trim().is_empty() && item.text.chars().count() <= 150
+                    && item.x.is_finite() && item.y.is_finite() && item.size.is_finite()
+                    && item.x >= 9.0 && item.x <= 411.0 && item.y >= 9.0 && item.y <= 288.0
+                    && item.size >= 2.0 && item.size <= 15.0
+            })
+            && self.dimensions.iter().all(|item| {
+                !item.id.is_empty() && self.views.iter().any(|view| view.id == item.view_id && view.mode != "iso")
+                    && item.a.into_iter().chain(item.b).all(|v| v.is_finite() && v >= 0.0 && v <= 420.0)
+            })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sheet {
     pub title: String,
     pub number: String,
@@ -411,6 +472,16 @@ pub struct Sheet {
     pub notes: String,
     #[serde(default = "default_cut_height")]
     pub cut_height: f64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub room_title: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub drawn_by: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub checked_by: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub issue_date: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<SheetLayout>,
 }
 
 impl Sheet {
@@ -423,6 +494,11 @@ impl Sheet {
             && self.notes.chars().count() <= 200
             && self.cut_height.is_finite()
             && self.cut_height.abs() <= 10000.0
+            && self.room_title.chars().count() <= 80
+            && self.drawn_by.chars().count() <= 40
+            && self.checked_by.chars().count() <= 40
+            && (self.issue_date.is_empty() || (self.issue_date.len() == 10 && self.issue_date.as_bytes()[4] == b'-' && self.issue_date.as_bytes()[7] == b'-'))
+            && self.layout.as_ref().is_none_or(SheetLayout::valid)
     }
 }
 
@@ -435,12 +511,20 @@ pub struct Comment {
     pub created_at: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub resolved: bool,
 }
 
 impl Comment {
     fn valid(&self) -> bool {
         uuid::Uuid::parse_str(&self.id).is_ok()
             && uuid::Uuid::parse_str(&self.target).is_ok()
+            && self
+                .parent
+                .as_ref()
+                .is_none_or(|parent| uuid::Uuid::parse_str(parent).is_ok())
             && !self.author.trim().is_empty()
             && self.author.chars().count() <= 32
             && !self.text.trim().is_empty()
@@ -454,6 +538,30 @@ impl Comment {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Share {
+    #[serde(default = "default_share_role")]
+    pub role: String,
+}
+
+impl Default for Share {
+    fn default() -> Self {
+        Self {
+            role: default_share_role(),
+        }
+    }
+}
+
+impl Share {
+    fn valid(&self) -> bool {
+        matches!(self.role.as_str(), "edit" | "comment" | "view")
+    }
+}
+
+fn default_share_role() -> String {
+    "edit".into()
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Document {
     pub revision: u64,
@@ -461,6 +569,8 @@ pub struct Document {
     pub sheet: Sheet,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub comments: Vec<Comment>,
+    #[serde(default)]
+    pub share: Share,
     #[serde(default)]
     pub faces_initialized: bool,
 }
@@ -485,6 +595,10 @@ pub enum Edit {
     Comment {
         before: Option<Comment>,
         after: Option<Comment>,
+    },
+    Share {
+        before: Share,
+        after: Share,
     },
 }
 
@@ -521,6 +635,16 @@ pub fn apply(document: &mut Document, edit: Edit) -> Result<FaceChanges, &'stati
             apply_comment(document, before, after)?;
             FaceChanges::default()
         }
+        Edit::Share { before, after } => {
+            if document.share != before {
+                return Err("conflict");
+            }
+            if !after.valid() {
+                return Err("Peran akses tidak valid.");
+            }
+            document.share = after;
+            FaceChanges::default()
+        }
     };
     document.revision += 1;
     Ok(changes)
@@ -543,7 +667,10 @@ fn apply_comment(
 ) -> Result<(), &'static str> {
     match (before, after) {
         (None, Some(comment)) => {
-            if !comment.valid() || !comment_target_exists(&document.objects, &comment.target) {
+            if !comment.valid()
+                || !comment_target_exists(&document.objects, &comment.target)
+                || !comment_parent_valid(document, &comment)
+            {
                 return Err("Komentar atau objek target tidak valid.");
             }
             if document.comments.iter().any(|item| item.id == comment.id) {
@@ -562,17 +689,25 @@ fn apply_comment(
             if document.comments[index] != before {
                 return Err("conflict");
             }
-            document.comments.remove(index);
+            let id = before.id.clone();
+            document.comments.retain(|item| item.id != id && item.parent.as_deref() != Some(&id));
             Ok(())
         }
         (Some(before), Some(after)) => {
-            if !after.valid() || !comment_target_exists(&document.objects, &after.target) {
+            if !after.valid()
+                || !comment_target_exists(&document.objects, &after.target)
+                || !comment_parent_valid(document, &after)
+            {
                 return Err("Komentar atau objek target tidak valid.");
             }
             let Some(index) = document.comments.iter().position(|item| item.id == before.id) else {
                 return Err("conflict");
             };
-            if document.comments[index] != before || after.id != before.id {
+            if document.comments[index] != before
+                || after.id != before.id
+                || after.parent != before.parent
+                || after.target != before.target
+            {
                 return Err("conflict");
             }
             document.comments[index] = after;
@@ -580,6 +715,20 @@ fn apply_comment(
         }
         (None, None) => Err("Perintah komentar tidak valid."),
     }
+}
+
+fn comment_parent_valid(document: &Document, comment: &Comment) -> bool {
+    let Some(parent) = comment.parent.as_deref() else {
+        return true;
+    };
+    if parent == comment.id {
+        return false;
+    }
+    document
+        .comments
+        .iter()
+        .find(|item| item.id == parent)
+        .is_some_and(|item| item.target == comment.target && item.parent.is_none())
 }
 
 fn apply_objects(
@@ -841,8 +990,14 @@ pub fn demo() -> Document {
             scale: 100,
             notes: "Dimensi model dalam meter.".into(),
             cut_height: default_cut_height(),
+            room_title: String::new(),
+            drawn_by: String::new(),
+            checked_by: String::new(),
+            issue_date: String::new(),
+            layout: None,
         },
         comments: Vec::new(),
+        share: Share::default(),
         faces_initialized: true,
     }
 }
@@ -1003,6 +1158,8 @@ mod tests {
             text: "Periksa ketebalan @Budi".into(),
             created_at: 1_700_000_000_000,
             mentions: vec!["Budi".into()],
+            parent: None,
+            resolved: false,
         };
         apply(
             &mut doc,
@@ -1058,6 +1215,8 @@ mod tests {
                     text: "Grup ini perlu ditinjau.".into(),
                     created_at: 1_700_000_000_000,
                     mentions: Vec::new(),
+                    parent: None,
+                    resolved: false,
                 }),
             },
         )
@@ -1092,6 +1251,8 @@ mod tests {
             text: "Tidak ada target.".into(),
             created_at: 1_700_000_000_000,
             mentions: Vec::new(),
+            parent: None,
+            resolved: false,
         };
         assert_eq!(
             apply(
@@ -1103,5 +1264,72 @@ mod tests {
             ),
             Err("Komentar atau objek target tidak valid.")
         );
+    }
+
+    #[test]
+    fn comment_replies_resolve_and_delete_together() {
+        let mut doc = demo();
+        let target = doc.objects[0].id.clone();
+        let top = Comment {
+            id: uuid::Uuid::new_v4().to_string(),
+            target: target.clone(),
+            author: "Rina".into(),
+            text: "Periksa ini.".into(),
+            created_at: 1_700_000_000_000,
+            mentions: Vec::new(),
+            parent: None,
+            resolved: false,
+        };
+        apply(
+            &mut doc,
+            Edit::Comment {
+                before: None,
+                after: Some(top.clone()),
+            },
+        )
+        .unwrap();
+        let reply = Comment {
+            id: uuid::Uuid::new_v4().to_string(),
+            target,
+            author: "Budi".into(),
+            text: "Sudah saya cek.".into(),
+            created_at: 1_700_000_001_000,
+            mentions: Vec::new(),
+            parent: Some(top.id.clone()),
+            resolved: false,
+        };
+        apply(
+            &mut doc,
+            Edit::Comment {
+                before: None,
+                after: Some(reply),
+            },
+        )
+        .unwrap();
+        let resolved = Comment {
+            resolved: true,
+            ..top.clone()
+        };
+        apply(
+            &mut doc,
+            Edit::Comment {
+                before: Some(top.clone()),
+                after: Some(resolved),
+            },
+        )
+        .unwrap();
+        assert!(doc.comments[0].resolved);
+        apply(
+            &mut doc,
+            Edit::Comment {
+                before: Some(Comment {
+                    resolved: true,
+                    ..top
+                }),
+                after: None,
+            },
+        )
+        .unwrap();
+        assert!(doc.comments.is_empty(), "deleting a thread removes replies");
     }
 }

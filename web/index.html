@@ -57,6 +57,7 @@
     <div class="collaboration">
       <label class="header-search"><span data-icon="search"></span><input id="search" type="search" placeholder="Cari objek" aria-label="Cari objek"></label>
       <button class="header-tool" id="theme-toggle" title="Ganti tema" aria-label="Ganti tema" data-icon="moon"></button>
+      <span id="access-badge" class="access-badge" hidden></span>
       <span id="connection"><i></i><span>Menghubungkan</span></span>
       <div class="avatar-area">
         <div class="avatars" id="avatars" aria-label="Editor aktif"></div>
@@ -95,7 +96,7 @@
       <div id="comment-composer" class="comment-composer" role="dialog" aria-label="Tulis komentar" hidden>
         <div class="comment-composer-head">
           <span data-icon="comment" aria-hidden="true"></span>
-          <div><strong>Tambah komentar</strong><small id="comment-target-name"></small></div>
+          <div><strong id="comment-composer-title">Tambah komentar</strong><small id="comment-target-name"></small></div>
           <button id="comment-cancel" type="button" aria-label="Tutup komentar" data-icon="close"></button>
         </div>
         <div class="comment-composer-body">
@@ -119,8 +120,33 @@
         <div class="stage-metrics"><span id="coordinates">X — &nbsp; Y —</span><label id="line-length-control" class="line-length-control" hidden><span id="measure-label">Panjang</span><input id="line-length" type="text" inputmode="decimal" autocomplete="off" aria-label="Ukuran gambar"><span id="line-unit">m</span><span id="measure-preview"></span></label><label class="unit-control">Satuan <select id="unit-select" aria-label="Satuan panjang"><option value="m">m</option><option value="cm">cm</option><option value="mm">mm</option></select></label><div class="grid-control"><button id="zoom-out" title="Perkecil" aria-label="Perkecil" data-icon="minus"></button><span id="zoom-label">100%</span><button id="zoom-in" title="Perbesar" aria-label="Perbesar" data-icon="plus"></button></div></div>
       </div>
     </section>
-    <section class="stage layout-stage" id="layout-stage" aria-label="Pratinjau lembar gambar" hidden>
-      <svg id="sheet" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 297" aria-label="Lembar arsitektur A3"></svg>
+    <section class="stage layout-stage" id="layout-stage" aria-label="Editor lembar gambar" hidden>
+      <div class="layout-toolbar" role="toolbar" aria-label="Alat Layout">
+        <button type="button" class="layout-tool active" data-layout-tool="select">Pilih</button>
+        <button type="button" class="layout-tool" data-layout-tool="text">Teks</button>
+        <button type="button" class="layout-tool" data-layout-tool="grid">Grid</button>
+        <button type="button" class="layout-tool" data-layout-tool="dimension">Dimensi</button>
+        <span class="layout-toolbar-spacer"></span>
+        <button type="button" id="layout-zoom-out" aria-label="Perkecil lembar">−</button>
+        <select id="layout-zoom" aria-label="Zoom lembar"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>100%</option><option value="1.25">125%</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option></select>
+        <button type="button" id="layout-zoom-in" aria-label="Perbesar lembar">＋</button>
+      </div>
+      <div class="layout-body">
+        <div class="layout-canvas" id="layout-canvas"><div class="layout-sheet-wrap"><svg id="sheet" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 297" aria-label="Lembar arsitektur A3"></svg></div></div>
+        <aside class="layout-side" aria-label="Lembar dan View Browser">
+          <h2>Lembar gambar</h2><div id="layout-mini" class="layout-mini" aria-label="Pratinjau lembar saat ini"></div>
+          <p class="layout-side-hint">A3 · Tarik lembar untuk menggeser tampilan</p>
+          <h2>View Browser</h2><p class="layout-side-hint">Tarik view ke lembar atau klik untuk menambahkan.</p>
+          <div id="layout-view-browser" class="layout-view-browser">
+            <button draggable="true" data-view-mode="plan" type="button">Denah</button>
+            <button draggable="true" data-view-mode="front" type="button">Tampak depan</button>
+            <button draggable="true" data-view-mode="right" type="button">Tampak kanan</button>
+            <button draggable="true" data-view-mode="iso" type="button">Aksonometri</button>
+          </div>
+          <div id="layout-selection" class="layout-selection" hidden><h2>Item terpilih</h2><label id="layout-view-title-row">Judul view<input id="layout-view-title" maxlength="80"></label><label id="layout-text-row" hidden>Teks<textarea id="layout-text-value" rows="3" maxlength="150"></textarea></label><button id="layout-delete" type="button">Hapus dari lembar</button></div>
+          <details class="layout-title-details" open><summary>Title block</summary><div id="layout-side-properties"></div></details>
+        </aside>
+      </div>
     </section>
     <aside class="sidebar inspector" id="inspector" hidden>
       <div id="inspector-resize" class="resize-handle inspector-resize" role="separator" tabindex="0" aria-label="Ubah lebar properti" aria-orientation="vertical" aria-valuemin="220" aria-valuemax="480" aria-valuenow="263" title="Tarik untuk mengubah lebar properti"></div>
@@ -168,7 +194,11 @@
       <div id="layout-inspector" hidden>
         <form id="sheet-form" class="form-section">
           <label>Judul proyek<input name="title" maxlength="80" required></label>
+          <label>Judul ruang<input name="room_title" maxlength="80" placeholder="Contoh: Ruang keluarga"></label>
           <label>Nomor gambar<input name="number" maxlength="20" required></label>
+          <label>Digambar oleh<input name="drawn_by" maxlength="40"></label>
+          <label>Diperiksa oleh<input name="checked_by" maxlength="40"></label>
+          <label>Tanggal gambar<input name="issue_date" type="date"></label>
           <label>Skala ortografis<select name="scale">
             <option value="25">1:25</option><option value="50">1:50</option><option value="75">1:75</option><option value="100">1:100</option><option value="150">1:150</option><option value="200">1:200</option><option value="500">1:500</option>
           </select></label>
@@ -190,9 +220,20 @@
     <div class="object-menu-title" id="object-menu-title"></div>
     <button id="object-menu-comment" role="menuitem"><span data-icon="comment"></span> Komentar</button>
   </div>
-  <dialog id="share-dialog">
+  <dialog id="share-dialog" class="share-dialog">
     <form method="dialog" class="dialog-head"><h2>Bagikan proyek</h2><button aria-label="Tutup" data-icon="close"></button></form>
-    <p>Siapa pun dengan tautan ini dapat mengedit proyek di server yang sama.</p>
+    <section class="share-section">
+      <h3>Orang dengan akses</h3>
+      <div id="share-people" class="share-people"></div>
+    </section>
+    <label class="share-role-field">Akses tautan
+      <select id="share-role">
+        <option value="edit">Dapat mengedit</option>
+        <option value="comment">Dapat berkomentar</option>
+        <option value="view">Hanya melihat</option>
+      </select>
+    </label>
+    <p id="share-role-hint" class="share-note"></p>
     <label>Nama tampilan<input type="text" id="display-name" maxlength="32"></label>
     <label>Tautan ruang<input id="share-link" readonly></label>
     <button class="share" id="copy-link"><span data-icon="copy"></span> Salin tautan</button>
