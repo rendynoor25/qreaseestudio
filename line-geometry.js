@@ -490,6 +490,70 @@ var QreaseeLine = (() => {
     }
     return queue;
   }
+  var cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  var normalize3 = (a) => {
+    const length = Math.hypot(a[0], a[1], a[2]);
+    return length > 1e-9 ? [a[0] / length, a[1] / length, a[2] / length] : null;
+  };
+  var roundKey = (value, digits = 4) => Math.round(value * 10 ** digits) / 10 ** digits;
+  function faceOnPlane(vertices) {
+    if (vertices.length < 3) return null;
+    let normal = null;
+    for (let i = 1; i < vertices.length - 1; i++) {
+      normal = normalize3(cross3(
+        [vertices[i][0] - vertices[0][0], vertices[i][1] - vertices[0][1], vertices[i][2] - vertices[0][2]],
+        [vertices[i + 1][0] - vertices[0][0], vertices[i + 1][1] - vertices[0][1], vertices[i + 1][2] - vertices[0][2]]
+      ));
+      if (normal) break;
+    }
+    if (!normal) return null;
+    let flipped = false;
+    for (const value of normal) {
+      if (Math.abs(value) <= 1e-9) continue;
+      flipped = value < 0;
+      break;
+    }
+    if (flipped) normal = [-normal[0], -normal[1], -normal[2]];
+    const offset = roundKey(dot3(normal, vertices[0]));
+    const key2 = normal.map((value) => roundKey(value)).join(",") + ":" + offset;
+    const helper = Math.abs(normal[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+    const u = normalize3(cross3(normal, helper));
+    if (!u) return null;
+    const v = cross3(normal, u);
+    const points = vertices.map((point) => [
+      dot3(point, u),
+      dot3(point, v)
+    ]);
+    return { key: key2, points };
+  }
+  function polygonTouches(a, b) {
+    if (a.max[0] < b.min[0] - 1e-5 || b.max[0] < a.min[0] - 1e-5 || a.max[1] < b.min[1] - 1e-5 || b.max[1] < a.min[1] - 1e-5) return false;
+    if (a.points.some((point) => pointInPolygon(point, b.points))) return true;
+    if (b.points.some((point) => pointInPolygon(point, a.points))) return true;
+    const orient = (p, q, r) => cross(p, q, r);
+    const crosses = (p, q, r, s) => {
+      const o1 = orient(p, q, r), o2 = orient(p, q, s), o3 = orient(r, s, p), o4 = orient(r, s, q);
+      return o1 * o2 < -1e-12 && o3 * o4 < -1e-12;
+    };
+    for (let i = 0; i < a.points.length; i++) {
+      for (let j = 0; j < b.points.length; j++) {
+        if (crosses(
+          a.points[i],
+          a.points[(i + 1) % a.points.length],
+          b.points[j],
+          b.points[(j + 1) % b.points.length]
+        )) return true;
+      }
+    }
+    return false;
+  }
+  function addTouch(byTouch, first, second) {
+    if (first === second) return;
+    if (!byTouch.has(first)) byTouch.set(first, /* @__PURE__ */ new Set());
+    if (!byTouch.has(second)) byTouch.set(second, /* @__PURE__ */ new Set());
+    byTouch.get(first).add(second);
+    byTouch.get(second).add(first);
+  }
   function boundaryLineIds(faceIds, entries) {
     const selected = new Set(faceIds);
     const vertexKey = (point) => point.map((value) => Math.round(value * precision)).join(":");
@@ -514,6 +578,7 @@ var QreaseeLine = (() => {
   function connectedFaces(seedId, entries) {
     const byEdge = /* @__PURE__ */ new Map();
     const edgesById = /* @__PURE__ */ new Map();
+    const byPlane = /* @__PURE__ */ new Map();
     const vertexKey = (point) => point.map((value) => Math.round(value * precision)).join(":");
     for (const { object, mesh } of entries) {
       if (object.shape === "line") continue;
@@ -529,8 +594,25 @@ var QreaseeLine = (() => {
           if (!byEdge.has(edge)) byEdge.set(edge, /* @__PURE__ */ new Set());
           byEdge.get(edge).add(object.id);
         }
+        const vertices = face.map((index) => mesh.vertices[index]).filter((point) => Boolean(point));
+        const plane = faceOnPlane(vertices);
+        if (!plane) continue;
+        const xs = plane.points.map((point) => point[0]), ys = plane.points.map((point) => point[1]);
+        const min = [Math.min(...xs), Math.min(...ys)];
+        const max = [Math.max(...xs), Math.max(...ys)];
+        if (!byPlane.has(plane.key)) byPlane.set(plane.key, []);
+        byPlane.get(plane.key).push({ id: object.id, points: plane.points, min, max });
       }
       edgesById.set(object.id, edges);
+    }
+    const byTouch = /* @__PURE__ */ new Map();
+    for (const faces of byPlane.values()) {
+      for (let i = 0; i < faces.length; i++) {
+        for (let j = i + 1; j < faces.length; j++) {
+          if (faces[i].id !== faces[j].id && polygonTouches(faces[i], faces[j]))
+            addTouch(byTouch, faces[i].id, faces[j].id);
+        }
+      }
     }
     if (!edgesById.has(seedId)) return [];
     const selected = /* @__PURE__ */ new Set([seedId]), queue = [seedId];
@@ -541,6 +623,12 @@ var QreaseeLine = (() => {
             selected.add(next);
             queue.push(next);
           }
+        }
+      }
+      for (const next of byTouch.get(id) ?? []) {
+        if (!selected.has(next)) {
+          selected.add(next);
+          queue.push(next);
         }
       }
     }

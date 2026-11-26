@@ -1935,6 +1935,23 @@ function previewMesh(object) {
   if (object.shape==='circle' && object.surface_role==='side') {
     if (object.height<=0) return {vertices:[],faces:[],cut:false};
     const w=object.width/2, d=object.depth/2;
+    if (object.wall_axis) {
+      const angle=object.rotation*Math.PI/180, sin=Math.sin(angle), cos=Math.cos(angle);
+      const [ux,uy]=object.wall_axis;
+      const u=[ux*cos-uy*sin,ux*sin+uy*cos],n=[u[1],-u[0]];
+      /** @type {QreaseePoint[]} */
+      const bottom=Array.from({length:48},(_,i)=>{
+        const theta=i*Math.PI/24, along=w*Math.cos(theta), vertical=d*Math.sin(theta);
+        return [object.x+along*u[0],object.y+along*u[1],object.z+vertical];
+      });
+      const vertices=/** @type {QreaseePoint[]} */ ([
+        ...bottom,
+        ...bottom.map(point=>/** @type {QreaseePoint} */ ([
+          point[0]+n[0]*object.height,point[1]+n[1]*object.height,point[2]]))
+      ]);
+      const faces=Array.from({length:48},(_,i)=>[i,(i+1)%48,(i+1)%48+48,i+48]);
+      return {vertices,faces,cut:false};
+    }
     const angle=object.rotation*Math.PI/180, sin=Math.sin(angle), cos=Math.cos(angle);
     const outline=Array.from({length:48},(_,i)=>{
       const theta=i*Math.PI/24;
@@ -1970,15 +1987,21 @@ function previewMesh(object) {
     const [ux,uy]=object.wall_axis;
     const u=[ux*cos-uy*sin,ux*sin+uy*cos], n=[u[1],-u[0]];
     const w=object.width/2,d=object.depth/2;
+    /** @type {QreaseePoint2[]} */
+    const outline=object.shape==='circle'
+      ? Array.from({length:48},(_,i)=>{const theta=i*Math.PI/24;return [w*Math.cos(theta),d*Math.sin(theta)];})
+      : [[-w,-d],[w,-d],[w,d],[-w,d]];
+    const count=outline.length;
     /** @type {QreaseePoint[]} */
-    const vertices=[[-w,-d],[w,-d],[w,d],[-w,d]].map(([along,vertical])=>
+    const vertices=outline.map(([along,vertical])=>
       /** @type {QreaseePoint} */ ([object.x+along*u[0],object.y+along*u[1],object.z+vertical]));
-    const faces=[[0,1,2,3]];
+    /** @type {number[][]} */
+    const faces=[Array.from({length:count},(_,i)=>i)];
     if (object.height>0) {
       vertices.push(...vertices.map(([x,y,z])=>/** @type {QreaseePoint} */ ([x+object.height*n[0],y+object.height*n[1],z])));
-      faces.splice(0,1,[3,2,1,0]);
-      for(let i=0;i<4;i++) faces.push([i,(i+1)%4,(i+1)%4+4,i+4]);
-      faces.push([4,5,6,7]);
+      faces.splice(0,1,Array.from({length:count},(_,i)=>count-1-i));
+      for(let i=0;i<count;i++) faces.push([i,(i+1)%count,(i+1)%count+count,i+count]);
+      faces.push(Array.from({length:count},(_,i)=>i+count));
     }
     return {vertices,faces,cut:false};
   }
@@ -2228,7 +2251,7 @@ function drawingPoint(point,elevation) {
 }
 
 function drawingCandidate(drag,point) {
-  let candidate=drag.tool==='rectangle' && drag.wall
+  let candidate=drag.wall && (drag.tool==='rectangle'||drag.tool==='circle')
     ? wallDrawingPoint(point,drag.wall,drag.initial)
     : drawingPoint(point,drag.tool==='line'?undefined:drag.initial[2]);
   if (!candidate?.world) return null;
@@ -2241,7 +2264,8 @@ function drawingCandidate(drag,point) {
 function shapePreview(drag,b) {
   const a=drag.initial,tool=drag.tool,size=measurement(tool);
   if (size?.invalid) return null;
-  const dx=b[0]-a[0],dy=b[1]-a[1],radius=Math.hypot(dx,dy);
+  const dx=b[0]-a[0],dy=b[1]-a[1];
+  const radius=drag.wall?Math.hypot(dx,dy,b[2]-a[2]):Math.hypot(dx,dy);
   if (tool==='rectangle') {
     const dimensions=size?{x:size.primary,y:size.secondary}:undefined;
     const geometry=drag.host?.shape==='rectangle' && (!drag.wall || drag.host.wall_axis)
@@ -2257,7 +2281,8 @@ function shapePreview(drag,b) {
     if (radius<.001) return null;
     const exact=size?.primary??radius;
     return {id:drag.id,name:'Bidang lingkaran',shape:'circle',x:a[0],y:a[1],z:a[2],
-      width:exact*2,depth:exact*2,height:0,rotation:0,color:'#dfcbb8'};
+      width:exact*2,depth:exact*2,height:0,rotation:0,
+      ...(drag.wall?{wall_axis:drag.wall.axis}:{}),color:'#dfcbb8'};
   }
   if (tool==='line') {
     const end=size?QreaseeLine.measuredEndpoint(a,b,size.primary):b;
@@ -2437,11 +2462,11 @@ canvas.addEventListener('pointerdown',event=>{
   } else {
     if (!state.doc || state.busy) return;
     let face=pickFace(start,tool!=='pull');
-    let rectangleWall=null;
-    if (tool==='rectangle') {
+    let planeWall=null;
+    if (tool==='rectangle'||tool==='circle') {
       const picked=pickRectangleFace(start);
       face=picked.face;
-      rectangleWall=picked.wall;
+      planeWall=picked.wall;
     }
     if (tool==='select') {
       if (face) select(targetId(face.object),event.shiftKey);
@@ -2531,20 +2556,21 @@ canvas.addEventListener('pointerdown',event=>{
       if (!initial) { showStatus('Gunakan denah atau tampilan 3D untuk mengukur.');return; }
       state.drag={tool,start,initial:initial.world};
     } else {
-      if (tool==='rectangle' && rectangleWall) {
-        const initial=wallDrawingPoint(start,rectangleWall);
+      if ((tool==='rectangle'||tool==='circle') && planeWall) {
+        const initial=wallDrawingPoint(start,planeWall);
         if (!initial) {showStatus('Arah pandang sejajar bidang vertikal. Putar kamera sedikit.');return;}
-        state.drag={tool,start,initial:initial.world,id:identity(),wall:rectangleWall,host:face?.object};
+        state.drag={tool,start,initial:initial.world,id:identity(),wall:planeWall,host:face?.object};
         state.inference=initial;
         canvas.setPointerCapture(event.pointerId);
         return;
       }
-      const planeZ=tool==='rectangle' && face && face.world.length>=3 &&
+      const planeZ=(tool==='rectangle'||tool==='circle') && face && face.world.length>=3 &&
         face.world.every(vertex=>Math.abs(vertex[2]-face.world[0][2])<.00001)
         ?face.world[0][2]:null;
       const initial=planeZ===null?drawingPoint(start):drawingPoint(start,planeZ);
       if (!initial) { showStatus('Gunakan denah atau aksonometri untuk menggambar.');return; }
-      state.drag={tool,start,initial:initial.world,id:identity(),host:tool==='rectangle'?face?.object:null};
+      state.drag={tool,start,initial:initial.world,id:identity(),
+        host:tool==='rectangle'||tool==='circle'?face?.object:null};
       state.inference=initial;
     }
   }
