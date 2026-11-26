@@ -190,6 +190,7 @@ interface QreaseeState {
   linePending: QreaseeLinePending | null;
   linePress: any;
   drawPending: any;
+  movePending: any;
   hits: QreaseeHit[];
   hoverKey: string | null;
   epoch: number;

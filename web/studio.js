@@ -58,7 +58,7 @@ const tools = {
   rectangle: ['Persegi panjang', 'R', 'Klik awal, ketik X × Y, lalu klik arah pada bidang horizontal atau vertikal'],
   circle: ['Lingkaran', 'C', 'Klik pusat, ketik radius, lalu klik arah'],
   pull: ['Push/Pull', 'P', 'Klik bidang, ketik jarak, lalu klik arah atas atau bawah'],
-  move: ['Pindah', 'M', 'Tarik objek sejajar bidang dasar'],
+  move: ['Pindah', 'M', 'Pilih objek, klik titik awal, lalu klik titik tujuan; snap tersedia'],
   rotate: ['Rotate', 'J', 'Tarik mengelilingi pusat objek untuk memutar pada sumbu Z'],
   scale: ['Skala', 'S', 'Tarik dari objek untuk mengubah ukurannya secara proporsional'],
   erase: ['Penghapus', 'E', 'Klik objek untuk menghapus; Ctrl+Z untuk mengurungkan'],
@@ -82,7 +82,7 @@ const state = {
   doc: null, meshes: [], plans: [], selected: new Set(), inside: null, tool: 'select', layout: false, busy: false,
   snapping: true, inference: null,
   undo: [], redo: [], drag: null, arcPending:null, linePending:null, linePress:null, drawPending:null,
-  hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null
+  movePending:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null
 };
 const canvas = $('#viewport');
 const ctx = canvas.getContext('2d');
@@ -165,6 +165,7 @@ function setTool(tool) {
     state.linePending=null;
     state.linePress=null;
     state.drawPending=null;
+    state.movePending=null;
     state.hoverKey=null;
     if (state.cursor) delete state.cursor.line;
     $('#line-length').value='';
@@ -452,6 +453,7 @@ function mode(layout) {
   state.linePending = null;
   state.linePress = null;
   state.drawPending = null;
+  state.movePending = null;
   $('#line-length-control').hidden=layout || !['line','rectangle','circle','arc','pull'].includes(state.tool);
   $('#line-length').value='';
   for (const id of ['stage','tree','inspector']) {
@@ -510,6 +512,7 @@ async function openRoom(createBlank) {
   state.linePending = null;
   state.linePress = null;
   state.drawPending = null;
+  state.movePending = null;
   $('#line-length-control').hidden=state.layout || !['line','rectangle','circle','arc','pull'].includes(state.tool);
   $('#line-length').value='';
   state.undo = [];
@@ -833,6 +836,7 @@ function renderTree() {
 }
 
 function select(id, additive=false) {
+  if (state.movePending) {state.movePending=null;state.inference=null;}
   if (!additive && state.selected.size===1 && state.selected.has(id)) return;
   if (!additive) {
     state.selected.clear();
@@ -910,6 +914,35 @@ function removeObject() {
   batch(targets,[],[]).then(deleted=>{
     if (deleted) showStatus(targets.length===1?'Objek dihapus.':targets.length+' objek dihapus.');
   });
+}
+
+/** @returns {QreaseeObject[]} */
+function moveSources() {
+  /** @type {Map<string, QreaseeObject>} */
+  const targets=new Map();
+  for (const id of state.selected) {
+    const group=members(id);
+    const candidates=group.length?group:objects().filter(object=>object.id===id);
+    for (const object of candidates) {
+      const linked=object.container?.definition && object.container.id===state.inside
+        ? linkedMembers(object) : [object];
+      for (const item of linked) targets.set(item.id,item);
+    }
+  }
+  return [...targets.values()];
+}
+
+function movePreview(sources,start,destination) {
+  if (!destination) return null;
+  const dx=destination[0]-start[0],dy=destination[1]-start[1];
+  return sources.map(object=>({...object,x:object.x+dx,y:object.y+dy}));
+}
+
+/** @param {QreaseePoint2} point @param {{z: number, excluded: Set<string>}} pending @returns {QreaseeInference|null} */
+function moveDestination(point,pending) {
+  return infer(point,pending.z,pending.excluded)
+    || infer(point,undefined,pending.excluded)
+    || drawingPoint(point,pending.z,pending.excluded);
 }
 
 $('#search').onfocus=()=>panel('objects',true);
@@ -1785,7 +1818,7 @@ function draw() {
   const pending = state.drawPending;
   if (state.doc) {
     let meshes = state.meshes, objects = state.doc.objects;
-    const updates=drag?.updates || pending?.updates;
+    const updates=drag?.updates || pending?.updates || state.movePending?.updates;
     if (updates) {
       const preview=new Map(updates.map(object=>[object.id,object]));
       meshes=objects.map((object,i)=>preview.has(object.id)?previewMesh(preview.get(object.id)):meshes[i]);
@@ -1848,6 +1881,16 @@ function draw() {
       ctx.font='bold 12px Segoe UI, sans-serif';
       ctx.fillStyle='#fff';ctx.fillRect((a[0]+b[0])/2-5,(a[1]+b[1])/2-18,ctx.measureText(label).width+10,19);
       ctx.fillStyle='#703b11';ctx.fillText(label,(a[0]+b[0])/2,(a[1]+b[1])/2-4);
+    }
+  }
+  if (state.movePending?.destination) {
+    const a=stagePoint(state.movePending.start), b=stagePoint(state.movePending.destination);
+    if (Number.isFinite(a[0]) && Number.isFinite(b[0])) {
+      strokeLine(a,b,'#c87936',1.3);
+      for (const [x,y] of [a,b]) {
+        ctx.beginPath();ctx.arc(x,y,3.5,0,Math.PI*2);
+        ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#c87936';ctx.lineWidth=1.5;ctx.stroke();
+      }
     }
   }
   const arcPreview=pending?.previewArc || (drag?.tool==='arc' && drag.end ? [drag.initial,drag.end] : state.arcPending?.preview);
@@ -2236,13 +2279,13 @@ function infer(point, elevation, excluded = new Set(), accept) {
   return best;
 }
 
-/** @param {QreaseePoint2} point @param {number=} elevation @returns {QreaseeInference|null} */
-function drawingPoint(point,elevation) {
+/** @param {QreaseePoint2} point @param {number=} elevation @param {Set<string>=} excluded @returns {QreaseeInference|null} */
+function drawingPoint(point,elevation,excluded=new Set()) {
   const face=elevation===undefined?pickFace(point,false):null;
   const surface=face?.world?.length && face.world.every(vertex=>Math.abs(vertex[2]-face.world[0][2])<.00001)
     ? face.world[0][2] : 0;
   const z=elevation??surface;
-  const hit=infer(point,z);
+  const hit=infer(point,z,excluded);
   if(hit) return hit;
   const xy=ground(point,z);
   if (!xy) return null;
@@ -2476,6 +2519,34 @@ canvas.addEventListener('pointerdown',event=>{
       }
       return;
     }
+    if (tool==='move') {
+      if (state.movePending) {
+        const pending=state.movePending;
+        const destination=moveDestination(start,pending);
+        if (!destination) {showStatus('Arahkan klik tujuan pada bidang yang terlihat.');return;}
+        const dx=destination.world[0]-pending.start[0],dy=destination.world[1]-pending.start[1];
+        if (Math.hypot(dx,dy)<.001) {showStatus('Titik tujuan masih sama dengan titik awal.');return;}
+        const updates=movePreview(pending.sources,pending.start,destination.world);
+        const selection=[...state.selected];
+        state.movePending=null;
+        state.inference=null;
+        batch(pending.sources,updates,selection).then(moved=>{
+          if (moved) showStatus(pending.sources.length+' objek dipindahkan.');
+        });
+        redraw();
+        return;
+      }
+      const sources=moveSources();
+      if (!sources.length) {showStatus('Pilih objek terlebih dahulu, lalu tentukan titik awal.');return;}
+      const hit=infer(start,undefined) || drawingPoint(start);
+      if (!hit) {showStatus('Tentukan titik awal pada bidang yang terlihat.');return;}
+      state.movePending={start:hit.world,z:hit.world[2],sources,
+        excluded:new Set(sources.map(object=>object.id)),destination:null,updates:null};
+      state.inference=hit.label?hit:null;
+      showStatus('Klik titik tujuan untuk memindahkan '+sources.length+' objek.');
+      redraw();
+      return;
+    }
     const object=face?.object;
     if (tool==='erase') {
       if (object) { select(targetId(object)); removeObject(); }
@@ -2530,12 +2601,12 @@ canvas.addEventListener('pointerdown',event=>{
       }
       select(id);
       state.drag={tool,start,object,sources,pivot,initial:Math.atan2(initial[1]-pivot[1],initial[0]-pivot[0])};
-    } else if (tool==='pull' || tool==='move') {
-      if (!object || (tool==='pull' && !face.top && !object.wall_axis && !object.plane_u)) {
-        showStatus(tool==='pull'?'Pilih bidang yang akan ditarik.':'Pilih objek yang akan dipindah.');
+    } else if (tool==='pull') {
+      if (!object || (!face.top && !object.wall_axis && !object.plane_u)) {
+        showStatus('Pilih bidang yang akan ditarik.');
         return;
       }
-      if (tool==='pull' && targetId(object)!==object.id) {
+      if (targetId(object)!==object.id) {
         showStatus('Gunakan tampilan 3D dan buka Edit isi untuk mengubah permukaan Group atau Component.');
         return;
       }
@@ -2543,12 +2614,10 @@ canvas.addEventListener('pointerdown',event=>{
       const selected=members(id);
       const sources=selected.length?selected:[object];
       const owned=new Set(sources.map(item=>item.id));
-      const anchor=tool==='move' ? infer(start,undefined,new Set(objects().filter(item=>!owned.has(item.id)).map(item=>item.id))) : null;
-      const elevation=anchor?.world[2]??object.z;
+      const elevation=object.z;
       const origin=ground(start,elevation);
-      if (tool==='move' && !origin) { showStatus('Gunakan denah atau tampilan 3D untuk memindah.');return; }
       select(id);
-      state.drag={tool,start,object,sources,owned,elevation,origin,anchor:anchor?.world??[...(origin||[0,0]),elevation]};
+      state.drag={tool,start,object,sources,owned,elevation,origin,anchor:[...(origin||[0,0]),elevation]};
     } else if (tool==='arc' && state.inside) {
       showStatus('Keluar dari Edit isi sebelum menggambar busur.');return;
     } else if (tool==='arc' || tool==='measure') {
@@ -2594,6 +2663,15 @@ canvas.addEventListener('pointermove',event=>{
     state.hoverKey=hovered ? (hovered.smooth ? hovered.object.id : hovered.key) : null;
   } else state.hoverKey=null;
   if (!drag) {
+    if (state.movePending) {
+      const pending=state.movePending;
+      const destination=moveDestination(point,pending);
+      pending.destination=destination?.world||null;
+      pending.updates=destination?movePreview(pending.sources,pending.start,destination.world):null;
+      state.inference=destination?.label?destination:null;
+      redraw();
+      return;
+    }
     if (state.drawPending) {
       const pending=state.drawPending;
       pending.hover=point;
@@ -2813,6 +2891,7 @@ window.addEventListener('keydown',event=>{
     if (state.drag) {state.drag=null;state.inference=null;setTool('select');redraw();return;}
     if (state.arcPending) {state.arcPending=null;state.inference=null;setTool('select');redraw();return;}
     if (state.drawPending) {state.drawPending=null;state.inference=null;setTool('select');redraw();return;}
+    if (state.movePending) {state.movePending=null;state.inference=null;setTool('select');redraw();return;}
     if (state.linePending) {finishLine();setTool('select');return;}
     if (typing) return;
     if (state.inside) {exitContainer();return;}
