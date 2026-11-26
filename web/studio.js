@@ -2687,7 +2687,7 @@ function onFaceBoundary(point,vertices) {
 function infer(point, elevation, excluded = new Set(), accept) {
   if (!state.snapping) return null;
   let best=null;
-  const add=(world,label,tier,owner)=>{
+  const add=(world,label,penalty,owner)=>{
     if (elevation!==undefined && Math.abs(world[2]-elevation)>.00001) return;
     if (accept && !accept(world)) return;
     const projected=stagePoint(world);
@@ -2698,15 +2698,13 @@ function infer(point, elevation, excluded = new Set(), accept) {
     if (hit && hit.object.id!==owner &&
         !(hit.object.shape==='polygon' && hit.object.height===0 && Math.abs(hit.object.z-world[2])<.00001) &&
         !onFaceBoundary(world,hit.world)) return;
+    const score=distance+penalty;
     const depth=Number.isFinite(projected[2])?projected[2]:-Infinity;
     if (best) {
-      if (tier>best.tier) return;
-      if (tier===best.tier) {
-        if (distance>best.distance+.5) return;
-        if (distance>=best.distance-.5 && depth<=best.depth) return;
-      }
+      if (score>best.score+1.5) return;
+      if (score>=best.score-1.5 && depth<=best.depth) return;
     }
-    best={world,label,tier,distance,depth};
+    best={world,label,score,depth};
   };
   const interpolate=(a,b,t)=>a.map((value,i)=>value+(b[i]-value)*t);
   for (const face of state.hits) {
@@ -2719,12 +2717,12 @@ function infer(point, elevation, excluded = new Set(), accept) {
       const owner=face.object.id;
       add(a,'Ujung',0,owner);
       if (count===2) add(b,'Ujung',0,owner);
-      add(interpolate(a,b,.5),'Titik tengah',1,owner);
+      add(interpolate(a,b,.5),'Titik tengah',4,owner);
       const length=dx*dx+dy*dy;
       if (length<.01) continue;
       const fraction=clamp(((point[0]-p[0])*dx+(point[1]-p[1])*dy)/length,0,1);
       const t=fraction*p[3]/((1-fraction)*q[3]+fraction*p[3]);
-      add(interpolate(a,b,t),'Pada tepi',2,owner);
+      add(interpolate(a,b,t),'Pada tepi',10,owner);
     }
   }
   return best;
