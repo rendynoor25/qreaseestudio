@@ -27,6 +27,11 @@ async function seedDocument() {
 function demoMeshes(document) {
   const meshes = document.objects.map(object => previewMesh(object));
   const plans = document.objects.map((object, index) => {
+    if (object.plane_u) {
+      const mesh=demoCopy(meshes[index]);
+      return mesh.vertices.every(point=>point[2]>document.sheet.cut_height)
+        ?{vertices:[],faces:[],cut:false}:mesh;
+    }
     if (object.wall_axis) {
       const mesh=demoCopy(meshes[index]);
       const cut=document.sheet.cut_height;

@@ -330,9 +330,11 @@ async function completeLinePoint(point) {
   const face=loop && QreaseeLine.polygonFromLoop(loop);
   const polygon=face && {id:identity(),name:'Bidang dari garis',shape:'polygon',
     ...face,height:0,rotation:0,color:'#dfcbb8'};
-  const saved=polygon && window.qreaseeDemoPost && !state.inside
-    ? await batch([],[object,polygon],[])
-    : await addObject(object);
+  const explicit=polygon && (window.qreaseeDemoPost || polygon.plane_u);
+  const split=state.inside?null:QreaseeLine.splitCrossingLines(objects(),object,identity);
+  const saved=split && (split.before.length || split.after.length>1 || explicit)
+    ? await batch(split.before,[...split.after,...(explicit?[polygon]:[])],[])
+    : explicit ? await batch([],[object,polygon],[]) : await addObject(object);
   if (saved && state.tool==='line' && state.linePending?.a===a) {
     if (polygon) {
       finishLine();
@@ -727,11 +729,11 @@ function refresh(force = false) {
     : 'Klik untuk memilih objek. Gunakan Shift + klik untuk menambah pilihan.';
   if (object) {
     $('#selection-title').textContent = object.name;
-    const kind = object.shape === 'line' ? 'Garis' : object.wall_axis ? 'Bidang vertikal' :
+    const kind = object.shape === 'line' ? 'Garis' : object.plane_u ? 'Bidang 3D' : object.wall_axis ? 'Bidang vertikal' :
       object.height ? 'Bentuk 3D' : 'Bidang';
     $('#selection-kind').textContent = kind;
-    $('#dimension-depth-label').textContent=object.wall_axis?'Tinggi bidang':'Lebar';
-    $('#dimension-height-label').textContent=object.wall_axis?'Tebal':'Tinggi';
+    $('#dimension-depth-label').textContent=object.plane_u?'Ukuran V':object.wall_axis?'Tinggi bidang':'Lebar';
+    $('#dimension-height-label').textContent=object.plane_u||object.wall_axis?'Tebal':'Tinggi';
     icon($('#object-glyph'), object.shape === 'line' ? 'line' : object.height ? 'cube' : object.shape);
     if (force || objectBaseline?.id !== object.id || form.dataset.dirty !== 'yes') {
       Object.entries(object).forEach(([key,value]) => {
@@ -892,6 +894,10 @@ function addObject(object) {
 
 /** @param {QreaseeObject} object @returns {QreaseePoint} */
 function surfaceNormal(object) {
+  if (object.plane_u && object.plane_v) {
+    const [u,v]=[object.plane_u,object.plane_v];
+    return [u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
+  }
   if (!object.wall_axis) return [0,0,1];
   const angle=object.rotation*Math.PI/180,cos=Math.cos(angle),sin=Math.sin(angle);
   const [x,y]=object.wall_axis,u=[x*cos-y*sin,x*sin+y*cos];
@@ -1652,6 +1658,22 @@ function draw() {
 
 /** @param {QreaseeObject} object @returns {QreaseeMesh} */
 function previewMesh(object) {
+  if (object.plane_u && object.plane_v && object.profile) {
+    const u=object.plane_u,v=object.plane_v,normal=surfaceNormal(object);
+    const vertices=object.profile.points.map(([a,b])=>/** @type {QreaseePoint} */ ([
+      object.x+u[0]*a*object.width+v[0]*b*object.depth,
+      object.y+u[1]*a*object.width+v[1]*b*object.depth,
+      object.z+u[2]*a*object.width+v[2]*b*object.depth]));
+    const top=QreaseeLine.triangulate(object.profile.points);
+    const faces=object.height>0?top.map(face=>[...face].reverse()):top.map(face=>[...face]);
+    if(object.height>0){
+      const count=vertices.length;
+      vertices.push(...vertices.map(point=>offsetPoint(point,normal.map(value=>value*object.height))));
+      for(let i=0;i<count;i++) faces.push([i,(i+1)%count,(i+1)%count+count,i+count]);
+      faces.push(...top.map(face=>face.map(index=>index+count)));
+    }
+    return {vertices,faces,cut:false};
+  }
   if (object.wall_axis) {
     const angle=object.rotation*Math.PI/180;
     const cos=Math.cos(angle),sin=Math.sin(angle);
@@ -2111,7 +2133,7 @@ canvas.addEventListener('pointerdown',event=>{
       select(id);
       state.drag={tool,start,object,sources,pivot,initial:Math.atan2(initial[1]-pivot[1],initial[0]-pivot[0])};
     } else if (tool==='pull' || tool==='move') {
-      if (!object || (tool==='pull' && !face.top && !object.wall_axis)) {
+      if (!object || (tool==='pull' && !face.top && !object.wall_axis && !object.plane_u)) {
         showStatus(tool==='pull'?'Pilih bidang yang akan ditarik.':'Pilih objek yang akan dipindah.');
         return;
       }
