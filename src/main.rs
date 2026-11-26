@@ -1,7 +1,7 @@
 mod model;
 mod topology;
 
-use model::{apply, demo, Document, Edit, Object};
+use model::{apply, demo, Document, Edit, Object, Point};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -34,6 +34,16 @@ struct Cursor {
     mode: String,
     x: f64,
     y: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    z: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    line: Option<LinePreview>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct LinePreview {
+    a: Point,
+    b: Point,
 }
 
 struct Peer {
@@ -282,8 +292,12 @@ impl Studio {
             .take(32)
             .collect();
         let cursor = request.cursor.filter(|cursor| match cursor.mode.as_str() {
-            "model" => cursor.x.abs() <= 10000.0 && cursor.y.abs() <= 10000.0,
-            "layout" => (0.0..=420.0).contains(&cursor.x) && (0.0..=297.0).contains(&cursor.y),
+            "model" => cursor.x.abs() <= 10000.0 && cursor.y.abs() <= 10000.0
+                && cursor.z.is_none_or(|z| z.is_finite() && z.abs() <= 10000.0)
+                && cursor.line.as_ref().is_none_or(|line| line.a.iter().chain(line.b.iter())
+                    .all(|value| value.is_finite() && value.abs() <= 10000.0)),
+            "layout" => (0.0..=420.0).contains(&cursor.x) && (0.0..=297.0).contains(&cursor.y)
+                && cursor.line.is_none(),
             _ => false,
         });
         if room.peers.len() < 64 || room.peers.contains_key(&request.client) {

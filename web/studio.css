@@ -198,6 +198,9 @@ body{grid-template-rows:56px minmax(0,1fr)}
 .stage-metrics #coordinates,.stage-metrics .unit-control{height:30px;display:flex;align-items:center;gap:5px;padding:0 7px;background:#fafbfc;border:1px solid #b9c2ca;border-radius:7px;box-shadow:0 2px 5px #15243316;color:#313c49;font-size:11px}
 .stage-metrics #coordinates{min-width:95px;justify-content:center}
 .stage-metrics .unit-control select{height:24px;background:transparent;color:#313c49;border:0;padding:0 2px}
+.line-length-control{height:30px;display:flex;align-items:center;gap:5px;padding:0 7px;background:#fafbfc;border:1px solid #b9c2ca;border-radius:7px;box-shadow:0 2px 5px #15243316;color:#313c49;font-size:11px;pointer-events:auto}
+.line-length-control input{width:58px;border:0;border-bottom:1px solid #9daab6;border-radius:0;background:transparent;color:#202a35;text-align:right;font-size:12px;outline:0}
+.line-length-control:focus-within{border-color:var(--brand)}
 #status{pointer-events:auto;background:#fafbfc;border:1px solid #b9c2ca;border-radius:7px;box-shadow:0 2px 5px #15243316;color:#313c49;font-size:11px;padding:7px 9px;max-width:min(350px,35vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 footer{display:flex;gap:14px;padding:0 12px;white-space:nowrap}
 footer #status{overflow:hidden;text-overflow:ellipsis;margin-right:auto}

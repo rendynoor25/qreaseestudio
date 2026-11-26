@@ -1,0 +1,200 @@
+// Shared shapes for the browser client. Keep these in sync with src/model.rs,
+// src/main.rs, and the JSON written by the Rust server.
+
+type QreaseePoint = [number, number, number];
+type QreaseePoint2 = [number, number];
+type QreaseeView = 'perspective' | 'iso' | 'plan' | 'front' | 'right';
+type QreaseeShape = 'line' | 'rectangle' | 'circle' | 'polygon';
+type QreaseeTool =
+  | 'select' | 'line' | 'arc' | 'offset' | 'rectangle' | 'circle'
+  | 'pull' | 'move' | 'rotate' | 'scale' | 'erase' | 'measure'
+  | 'orbit' | 'pan';
+
+interface QreaseeMembership {
+  id: string;
+  name: string;
+  definition: string | null;
+  slot: string | null;
+}
+
+interface QreaseeProfile {
+  points: QreaseePoint2[];
+  inferred: boolean;
+}
+
+interface QreaseeObject {
+  id: string;
+  name: string;
+  shape: QreaseeShape;
+  x: number;
+  y: number;
+  z: number;
+  width: number;
+  depth: number;
+  height: number;
+  rotation: number;
+  color: string;
+  container?: QreaseeMembership | null;
+  profile?: QreaseeProfile | null;
+}
+
+interface QreaseeSheet {
+  title: string;
+  number: string;
+  scale: number;
+  notes: string;
+  cut_height: number;
+}
+
+interface QreaseeDocument {
+  revision: number;
+  objects: QreaseeObject[];
+  sheet: QreaseeSheet;
+  faces_initialized?: boolean;
+}
+
+interface QreaseeMesh {
+  vertices: QreaseePoint[];
+  faces: number[][];
+  cut: boolean;
+  cap?: [number, number, number][] | null;
+}
+
+interface QreaseeObjectEdit {
+  type: 'object';
+  before?: QreaseeObject | null;
+  after?: QreaseeObject | null;
+}
+
+interface QreaseeBatchEdit {
+  type: 'batch';
+  before: QreaseeObject[];
+  after: QreaseeObject[];
+  replay?: boolean;
+}
+
+interface QreaseeSheetEdit {
+  type: 'sheet';
+  before: QreaseeSheet;
+  after: QreaseeSheet;
+}
+
+type QreaseeEdit = QreaseeObjectEdit | QreaseeBatchEdit | QreaseeSheetEdit;
+
+interface QreaseeChangeSet {
+  document: QreaseeDocument;
+  meshes: QreaseeMesh[];
+  plans: QreaseeMesh[];
+}
+
+interface QreaseeLinePreview {
+  a: QreaseePoint;
+  b: QreaseePoint;
+}
+
+interface QreaseeCursor {
+  mode: 'model' | 'layout';
+  x: number;
+  y: number;
+  z?: number;
+  line?: QreaseeLinePreview;
+}
+
+interface QreaseePeer {
+  id: string;
+  name: string;
+  cursor: QreaseeCursor | null;
+}
+
+interface QreaseeFaceChanges {
+  added: QreaseeObject[];
+  removed: QreaseeObject[];
+}
+
+interface QreaseeResponse {
+  changes?: QreaseeChangeSet | null;
+  peers?: QreaseePeer[];
+  error?: string | null;
+  topology?: QreaseeFaceChanges | null;
+  room?: string;
+}
+
+interface QreaseeLinePending {
+  a: QreaseePoint;
+  b: QreaseePoint | null;
+  preview: QreaseePoint[];
+}
+
+interface QreaseeInference {
+  world: QreaseePoint;
+  label: string;
+}
+
+interface QreaseeHit {
+  object: QreaseeObject;
+  points: number[][];
+  edges: boolean[] | null;
+  world: QreaseePoint[];
+  top: boolean;
+  tone: number;
+  cut: boolean;
+  depth: number;
+}
+
+interface QreaseeCamera {
+  yaw: number;
+  pitch: number;
+  axes: number[][] | null;
+  scale: number;
+  base: number;
+  baseDistance: number;
+  x: number;
+  y: number;
+  center: QreaseePoint;
+  distance: number;
+  perspective: boolean;
+}
+
+interface QreaseeState {
+  room: string;
+  client: string;
+  name: string;
+  doc: QreaseeDocument | null;
+  meshes: QreaseeMesh[];
+  plans: QreaseeMesh[];
+  selected: Set<string>;
+  inside: string | null;
+  tool: QreaseeTool;
+  layout: boolean;
+  busy: boolean;
+  snapping: boolean;
+  inference: QreaseeInference | null;
+  undo: any[];
+  redo: any[];
+  drag: any;
+  arcPending: any;
+  linePending: QreaseeLinePending | null;
+  linePress: any;
+  hits: QreaseeHit[];
+  epoch: number;
+  polling: boolean;
+  peers: QreaseePeer[];
+  cursor: QreaseeCursor | null;
+}
+
+interface QreaseeCloudConfig {
+  url: string;
+  key: string;
+}
+
+interface Window {
+  qreaseeDemoPost?: (url: string, request: any) => Promise<{ code: number; data: QreaseeResponse }>;
+  qreaseeCloudPost?: boolean;
+  qreaseeCloudConfig?: QreaseeCloudConfig;
+  qreaseeAuth?: {
+    ready: Promise<unknown>;
+    session(): Promise<{ access_token: string }>;
+    readonly displayName: string;
+    signOut(): Promise<void>;
+  };
+}

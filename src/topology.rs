@@ -80,7 +80,7 @@ fn scope(object: &Object) -> Option<String> {
 
 fn segments(objects: &[Object]) -> BTreeMap<(Option<String>, i64), Vec<[Vertex; 2]>> {
     let mut planes = BTreeMap::<_, Vec<_>>::new();
-    for object in objects.iter().filter(|object| object.shape == Shape::Line) {
+    for object in objects.iter().filter(|object| object.shape == Shape::Line && object.height == 0.0) {
         let points = object.footprint();
         let mut pair = [vertex(points[0]), vertex(points[1])];
         pair.sort_unstable();

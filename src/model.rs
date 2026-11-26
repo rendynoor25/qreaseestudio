@@ -102,7 +102,7 @@ impl Object {
                 _ => true,
             }
             && match self.shape {
-                Shape::Line => self.height == 0.0 && self.width.hypot(self.depth) >= 0.001,
+                Shape::Line => self.width.hypot(self.depth).hypot(self.height) >= 0.001,
                 _ => self.width >= 0.001 && self.depth >= 0.001 && self.height >= 0.0,
             }
     }
@@ -139,6 +139,9 @@ impl Object {
         let outline = self.footprint();
         let layer = |z| outline.iter().map(move |[x, y]| [*x, *y, z]);
         let mut vertices: Vec<_> = layer(self.z).collect();
+        if self.shape == Shape::Line {
+            vertices[1][2] += self.height;
+        }
         let count = vertices.len();
         let mut faces = Vec::new();
         let cap = self
@@ -543,6 +546,19 @@ mod tests {
         assert_eq!(mesh.faces.len(), 6);
         assert!((mesh.vertices[0][0] - 4.0).abs() < 0.0001);
         assert_eq!(mesh.vertices[4][2], 0.28);
+    }
+
+    #[test]
+    fn vertical_line_keeps_distinct_endpoint_heights() {
+        let mut line = demo().objects.remove(0);
+        line.shape = Shape::Line;
+        line.width = 0.0;
+        line.depth = 0.0;
+        line.height = 2.4;
+        assert!(line.valid());
+        let vertices = line.mesh().vertices;
+        assert_eq!(vertices[0][2], 0.0);
+        assert_eq!(vertices[1][2], 2.4);
     }
 
     #[test]

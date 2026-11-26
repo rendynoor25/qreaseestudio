@@ -1,5 +1,7 @@
+// @ts-check
 'use strict';
 
+/** @param {string} selector @returns {any} */
 const $ = selector => document.querySelector(selector);
 const icons = {
   snap:'<path d="M5 4v9a7 7 0 0 0 14 0V4h-4v9a3 3 0 0 1-6 0V4zM5 8h4m6 0h4"/>',
@@ -44,11 +46,13 @@ const icons = {
 function icon(element, name) {
   element.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + icons[name] + '</svg>';
 }
-document.querySelectorAll('[data-icon]').forEach(element => icon(element, element.dataset.icon));
+document.querySelectorAll('[data-icon]').forEach(
+  /** @param {HTMLElement} element */ element => icon(element, element.dataset.icon));
 
+/** @type {Record<QreaseeTool, [string, string, string]>} */
 const tools = {
   select: ['Pilih', 'V', 'Klik objek untuk memilih'],
-  line: ['Garis', 'L', 'Tarik garis pada bidang dasar'],
+  line: ['Garis', 'L', 'Klik titik awal, lalu klik titik berikutnya; ketik panjang untuk ukuran tepat'],
   arc: ['Busur', 'A', 'Tarik titik awal ke titik akhir, lalu klik untuk menentukan lengkung busur'],
   offset: ['Offset', 'I', 'Tarik dari bidang persegi atau lingkaran untuk membuat kontur sejajar'],
   rectangle: ['Persegi panjang', 'R', 'Tarik persegi panjang pada bidang dasar'],
@@ -72,39 +76,52 @@ const identity = () => {
   return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-');
 };
 
+/** @type {QreaseeState} */
 const state = {
   room: '', client: identity(), name: localStorage.getItem('qreasee-name') || 'Tamu',
   doc: null, meshes: [], plans: [], selected: new Set(), inside: null, tool: 'select', layout: false, busy: false,
   snapping: true, inference: null,
-  undo: [], redo: [], drag: null, arcPending:null, hits: [], epoch: 0, polling: false, peers:[], cursor:null
+  undo: [], redo: [], drag: null, arcPending:null, linePending:null, linePress:null,
+  hits: [], epoch: 0, polling: false, peers:[], cursor:null
 };
 const canvas = $('#viewport');
 const ctx = canvas.getContext('2d');
+/** @type {QreaseeCamera} */
 const camera = { yaw: .62, pitch: .48, axes:null, scale: 40, base: 40, baseDistance:22,
   x: 0, y: 0, center:[0,0,0], distance:22, perspective:true };
 const perspectiveFov = 35*Math.PI/180;
 const nearPlane = .01;
 const unitFactors = {m:1,cm:100,mm:1000};
 let displayUnit = unitFactors[localStorage.getItem('qreasee-unit')] ? localStorage.getItem('qreasee-unit') : 'm';
+/** @type {Record<QreaseeView, QreaseePoint2>} */
 const views = { perspective:[.62,.48], iso:[.62,.54], plan:[0,Math.PI/2], front:[0,0], right:[Math.PI/2,0] };
 const clamp = (value,min,max) => Math.max(min,Math.min(max,value));
 const round = value => Math.round(value * 1000) / 1000;
+/** @param {QreaseePoint} point @returns {QreaseePoint} */
+const roundPoint = point => [round(point[0]), round(point[1]), round(point[2])];
 const snap = (value, step = .25) => Math.round(value / step) * step;
 const svgNS = 'http://www.w3.org/2000/svg';
 let statusTimer;
-const status = message => {
+const showStatus = message => {
   const label=$('#status');
   label.textContent=message;
   label.hidden=message==='Ruang model siap.';
   clearTimeout(statusTimer);
   if (!label.hidden) statusTimer=setTimeout(()=>{label.hidden=true;},5000);
 };
+/** @returns {QreaseeObject[]} */
 const objects = () => state.doc?.objects || [];
+/** @param {string} id @returns {QreaseeObject[]} */
 const members = id => objects().filter(object => object.container?.id === id);
+/** @returns {string|null} */
 const onlySelected = () => state.selected.size===1 ? state.selected.values().next().value : null;
+/** @returns {QreaseeObject|undefined} */
 const currentObject = () => objects().find(object => object.id === onlySelected());
+/** @param {QreaseeObject|null|undefined} object @returns {string|undefined} */
 const targetId = object => object?.container && object.container.id!==state.inside ? object.container.id : object?.id;
+/** @type {QreaseeObject|null} */
 let objectBaseline = null;
+/** @type {QreaseeSheet|null} */
 let sheetBaseline = null;
 let frame = 0;
 
@@ -120,11 +137,19 @@ for (const [id, [label, key]] of Object.entries(tools)) {
 }
 
 function setTool(tool) {
-  if (state.tool!==tool) state.arcPending=null;
+  if (state.tool!==tool) {
+    state.arcPending=null;
+    state.linePending=null;
+    state.linePress=null;
+    if (state.cursor) delete state.cursor.line;
+    $('#line-length-control').hidden=true;
+    $('#line-length').value='';
+  }
   state.tool = tool;
   $('#tool-hint').textContent = tools[tool][2];
   canvas.dataset.tool = tool;
-  document.querySelectorAll('[data-tool].icon-button').forEach(button => {
+  document.querySelectorAll('[data-tool].icon-button').forEach(
+    /** @param {HTMLElement} button */ button => {
     const active = button.dataset.tool === tool;
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
@@ -205,10 +230,11 @@ $('#sign-out').onclick=async()=>{
   const button=$('#sign-out');
   button.disabled=true;
   try { await window.qreaseeAuth.signOut(); }
-  catch (error) { status(error.message || 'Gagal keluar.');button.disabled=false; }
+  catch (error) { showStatus(error.message || 'Gagal keluar.');button.disabled=false; }
 };
 document.addEventListener('pointerdown',event=>{
-  if (!$('#account-menu').hidden && !event.target.closest('.avatar-area')) accountMenu(false);
+  const target=/** @type {Element} */ (event.target);
+  if (!$('#account-menu').hidden && !target.closest('.avatar-area')) accountMenu(false);
 });
 $('#tree-toggle').onclick=()=>{
   const open=$('#objects').hidden;
@@ -231,6 +257,104 @@ function updateCoordinates() {
   $('#coordinates').textContent=state.cursor
     ? 'X '+displayLength(state.cursor.x)+'  Y '+displayLength(state.cursor.y) : 'X —  Y —';
 }
+function updateLineLength() {
+  const pending=state.linePending;
+  if (!pending) return;
+  const input=$('#line-length');
+  if (document.activeElement===input) return;
+  const distance=pending.b ? Math.hypot(
+    pending.b[0]-pending.a[0],pending.b[1]-pending.a[1],pending.b[2]-pending.a[2]) : 0;
+  input.value=distance>=.001 ? displayLength(distance) : '';
+}
+/** @param {QreaseePoint} world */
+function beginLine(world) {
+  state.linePending={a:[...world],b:null,preview:[world]};
+  state.cursor={mode:'model',x:round(world[0]),y:round(world[1]),z:round(world[2])};
+  $('#line-unit').textContent=displayUnit;
+  $('#line-length').value='';
+  $('#line-length-control').hidden=false;
+  showStatus('Klik titik berikutnya. Ketik panjang lalu Enter untuk ukuran tepat.');
+  redraw();
+}
+function finishLine() {
+  state.linePending=null;
+  state.linePress=null;
+  state.inference=null;
+  $('#line-length-control').hidden=true;
+  $('#line-length').value='';
+  if (state.cursor) delete state.cursor.line;
+  redraw();
+}
+/** @param {QreaseePoint} point @returns {Promise<boolean>} */
+async function completeLinePoint(point) {
+  const pending=state.linePending;
+  if (!pending || state.busy) return false;
+  const a=pending.a;
+  const distance=Math.hypot(point[0]-a[0],point[1]-a[1],point[2]-a[2]);
+  if (distance<.001) {
+    showStatus('Titik akhir harus berbeda dari titik awal.');
+    return false;
+  }
+  const object=lineObject(a,point);
+  if (!object) return false;
+  $('#line-length').value='';
+  const saved=await addObject(object);
+  if (saved && state.tool==='line' && state.linePending?.a===a) {
+    state.linePending={a:[...point],b:null,preview:[[...point]]};
+    if (state.cursor) delete state.cursor.line;
+    $('#line-length').value='';
+    canvas.focus({preventScroll:true});
+    showStatus('Garis '+lengthLabel(distance)+'. Klik titik berikutnya atau Esc untuk selesai.');
+  }
+  return saved;
+}
+function applyLineLength() {
+  const pending=state.linePending;
+  const input=$('#line-length');
+  if (!pending) return;
+  if (!pending.b) {
+    showStatus('Gerakkan kursor untuk menentukan arah, lalu ketik panjang.');
+    return;
+  }
+  const value=Number(input.value)/unitFactors[displayUnit];
+  if (!Number.isFinite(value) || value<.001) {
+    showStatus('Panjang garis minimal 0,001 m.');
+    return;
+  }
+  const a=pending.a, b=pending.b;
+  const current=Math.hypot(b[0]-a[0],b[1]-a[1],b[2]-a[2]);
+  if (current<.000001) {
+    showStatus('Gerakkan kursor menjauh dari titik awal untuk menentukan arah.');
+    return;
+  }
+  const factor=value/current;
+  completeLinePoint([a[0]+(b[0]-a[0])*factor,a[1]+(b[1]-a[1])*factor,a[2]+(b[2]-a[2])*factor]);
+}
+$('#line-length').addEventListener('input',()=>{
+  const pending=state.linePending;
+  if (!pending?.b) return;
+  const value=Number($('#line-length').value)/unitFactors[displayUnit];
+  if (!Number.isFinite(value) || value<.001) return;
+  const a=pending.a, b=pending.b;
+  const current=Math.hypot(b[0]-a[0],b[1]-a[1],b[2]-a[2]);
+  if (current<.000001) return;
+  const factor=value/current;
+  b[0]=a[0]+(b[0]-a[0])*factor;
+  b[1]=a[1]+(b[1]-a[1])*factor;
+  b[2]=a[2]+(b[2]-a[2])*factor;
+  pending.preview=[a,[...b]];
+  redraw();
+});
+$('#line-length').addEventListener('keydown',event=>{
+  if (event.key==='Enter') {
+    event.preventDefault();
+    applyLineLength();
+  } else if (event.key==='Escape') {
+    event.preventDefault();
+    finishLine();
+    canvas.focus({preventScroll:true});
+  }
+});
 function convertFormUnits(form,fields,before,after) {
   for (const field of fields) {
     const input=form.elements.namedItem(field);
@@ -245,16 +369,23 @@ $('#unit-select').onchange=event=>{
   convertFormUnits($('#sheet-form'),['cut_height'],before,after);
   displayUnit=next;
   document.querySelectorAll('.unit-label').forEach(label=>label.textContent=next);
+  $('#line-unit').textContent=next;
   localStorage.setItem('qreasee-unit',next);
   updateCoordinates();
+  updateLineLength();
   if (state.layout) drawSheet();
 };
 document.querySelectorAll('.unit-label').forEach(label=>label.textContent=displayUnit);
+$('#line-unit').textContent=displayUnit;
 
 function mode(layout) {
   state.layout = layout;
   state.cursor = null;
   state.arcPending = null;
+  state.linePending = null;
+  state.linePress = null;
+  $('#line-length-control').hidden=true;
+  $('#line-length').value='';
   for (const id of ['stage','tree','inspector']) {
     $('#model-' + id).hidden = layout;
     $('#layout-' + id).hidden = !layout;
@@ -308,6 +439,10 @@ async function openRoom(createBlank) {
   state.inside = null;
   state.inference = null;
   state.arcPending = null;
+  state.linePending = null;
+  state.linePress = null;
+  $('#line-length-control').hidden=true;
+  $('#line-length').value='';
   state.undo = [];
   state.redo = [];
   state.polling = false;
@@ -336,7 +471,7 @@ async function openRoom(createBlank) {
   } catch (error) {
     if (state.epoch === epoch) {
       connection(false, 'Terputus');
-      status(error.message || 'Server tidak dapat dihubungi. Muat ulang halaman untuk mencoba lagi.');
+      showStatus(error.message || 'Server tidak dapat dihubungi. Muat ulang halaman untuk mencoba lagi.');
     }
   }
 }
@@ -352,7 +487,7 @@ function accept(data) {
       const initial = state.doc.objects.find(object => object.name === 'Atap utama');
       if (initial) state.selected.add(targetId(initial));
       fit();
-      status('Ruang model siap.');
+      showStatus('Ruang model siap.');
     }
     refresh(first);
   }
@@ -375,10 +510,11 @@ function accept(data) {
   }
 }
 
+/** @param {Element} avatars @param {QreaseePeer[]} peers */
 function renderAvatars(avatars,peers) {
   for (const peer of peers.slice(0, 4)) {
     const own=peer.id===state.client;
-    const item = document.createElement(own?'button':'span');
+    const item = /** @type {any} */ (document.createElement(own?'button':'span'));
     item.className = 'avatar'+(own?' self-avatar':'');
     item.title = (own?window.qreaseeAuth?.displayName:peer.name) || 'Tamu';
     if (own) {
@@ -413,7 +549,7 @@ async function sync() {
     if (state.epoch !== epoch || state.busy) return;
     if (result.code === 200) accept(result.data);
     else {
-      status(result.data.error || 'Sinkronisasi gagal.');
+      showStatus(result.data.error || 'Sinkronisasi gagal.');
       connection(false, 'Tidak tersedia');
       if (result.code === 404) state.room = '';
     }
@@ -435,16 +571,16 @@ async function commit(edit, success) {
     if (result.data.peers) accept(result.data);
     if (result.code !== 200) {
       if (result.code === 409) refresh(true);
-      status(result.data.error || 'Perubahan gagal disimpan.');
+      showStatus(result.data.error || 'Perubahan gagal disimpan.');
       return false;
     }
     if (success) success(result.data.topology);
     const newFaces = result.data.topology?.added.filter(object=>object.profile?.inferred).length || 0;
-    status(newFaces ? newFaces+' bidang baru terbentuk dari garis.' : 'Perubahan tersimpan.');
+    showStatus(newFaces ? newFaces+' bidang baru terbentuk dari garis.' : 'Perubahan tersimpan.');
     refresh(true);
     return true;
   } catch {
-    if (state.epoch === epoch) status('Sambungan terputus saat menyimpan. Revisi akan diperiksa ulang.');
+    if (state.epoch === epoch) showStatus('Sambungan terputus saat menyimpan. Revisi akan diperiksa ulang.');
     return false;
   } finally {
     if (state.epoch === epoch) {
@@ -716,7 +852,7 @@ $('#object-form').oninput = event => { event.currentTarget.dataset.dirty = 'yes'
 $('#object-form').onsubmit = event => {
   event.preventDefault();
   if (!objectBaseline) return;
-  const values = Object.fromEntries(new FormData(event.currentTarget));
+  const values = /** @type {Record<string, any>} */ (Object.fromEntries(new FormData(event.currentTarget)));
   for (const field of lengthFields) values[field] = Number(values[field])/unitFactors[displayUnit];
   values.rotation=Number(values.rotation);
   edit(objectBaseline, {...objectBaseline,...values});
@@ -725,7 +861,7 @@ $('#sheet-form').oninput = event => { event.currentTarget.dataset.dirty = 'yes';
 $('#sheet-form').onsubmit = event => {
   event.preventDefault();
   if (!sheetBaseline) return;
-  const values = Object.fromEntries(new FormData(event.currentTarget));
+  const values = /** @type {Record<string, any>} */ (Object.fromEntries(new FormData(event.currentTarget)));
   values.scale = Number(values.scale);
   values.cut_height = Number(values.cut_height)/unitFactors[displayUnit];
   edit(sheetBaseline, values, 'sheet');
@@ -785,6 +921,7 @@ $('#export-obj').onclick = () => {
 };
 
 
+/** @param {number} yaw @param {number} pitch @returns {(point: QreaseePoint) => QreaseePoint} */
 function basis(yaw, pitch) {
   const sy = Math.sin(yaw), cy = Math.cos(yaw);
   const sp = Math.sin(pitch), cp = Math.cos(pitch);
@@ -794,13 +931,19 @@ function basis(yaw, pitch) {
 function cameraAxes() {
   if (camera.axes) return camera.axes;
   const project=basis(camera.yaw,camera.pitch);
-  const columns=[[1,0,0],[0,1,0],[0,0,1]].map(axis=>project(axis));
+  /** @type {QreaseePoint[]} */
+  const columns=[[1,0,0],[0,1,0],[0,0,1]].map(
+    /** @param {QreaseePoint} axis */ axis=>project(axis));
   camera.axes=[0,1,2].map(row=>columns.map(column=>column[row]));
   return camera.axes;
 }
 
+/** @param {number[][]} points @returns {{min: QreaseePoint, max: QreaseePoint}} */
 function bounds(points) {
-  const min = [Infinity,Infinity,Infinity], max = [-Infinity,-Infinity,-Infinity];
+  /** @type {QreaseePoint} */
+  const min = [Infinity,Infinity,Infinity];
+  /** @type {QreaseePoint} */
+  const max = [-Infinity,-Infinity,-Infinity];
   for (const point of points) {
     point.forEach((value,index) => {
       min[index] = Math.min(min[index],value);
@@ -818,7 +961,7 @@ function fit() {
   const world = state.meshes.flatMap(mesh => mesh.vertices);
   if (!world.length) world.push([-6,-4,0],[6,4,0]);
   const box=bounds(world);
-  camera.center=box.min.map((low,i)=>(low+box.max[i])/2);
+  camera.center=/** @type {QreaseePoint} */ (box.min.map((low,i)=>(low+box.max[i])/2));
   const width = canvas.clientWidth || $('#layout-stage').clientWidth || 800;
   const height = canvas.clientHeight || 500;
   if (camera.perspective) {
@@ -847,6 +990,7 @@ function fit() {
   redraw();
 }
 
+/** @param {QreaseeView} value */
 function cameraView(value) {
   [camera.yaw,camera.pitch] = views[value];
   camera.axes=null;
@@ -868,7 +1012,7 @@ function zoom(factor,x=canvas.clientWidth/2,y=canvas.clientHeight/2) {
     const step=(1-ratio)*Math.max(fromEye,1.2);
     const nextEye=eye.map((value,i)=>value+step*direction[i]);
     camera.distance=clamp(camera.distance*ratio,.1,100000);
-    camera.center=nextEye.map((value,i)=>value-camera.distance*depth[i]);
+    camera.center=/** @type {QreaseePoint} */ (nextEye.map((value,i)=>value-camera.distance*depth[i]));
     camera.scale=focalPixels()/camera.distance;
     redraw();
     return;
@@ -886,6 +1030,7 @@ $('#fit').onclick = fit;
 $('#zoom-in').onclick = () => zoom(1.2);
 $('#zoom-out').onclick = () => zoom(1/1.2);
 
+/** @param {QreaseePoint} point @returns {[number, number, number, number]} */
 function projectPoint(point) {
   const relative=point.map((value,i)=>value-camera.center[i]);
   const [u,v,d]=cameraAxes().map(axis=>axis.reduce((sum,value,i)=>sum+value*relative[i],0));
@@ -893,13 +1038,16 @@ function projectPoint(point) {
   return w>(camera.perspective ? nearPlane/camera.distance-1e-9 : 0) ? [u/w,v/w,d/w,w] : [NaN,NaN,d,w];
 }
 
+/** @param {QreaseePoint} point @returns {[number, number, number, number]} */
 function stagePoint(point) {
   const [x,y,depth,w] = projectPoint(point);
   return [canvas.clientWidth/2+camera.x+x*camera.scale,
     canvas.clientHeight/2+camera.y+y*camera.scale,depth,w];
 }
 
-function ground([x,y], z=0) {
+/** @param {QreaseePoint2} position @param {number=} z @returns {QreaseePoint2|null} */
+function ground(position, z=0) {
+  const [x,y]=position;
   const [rightAxis,downAxis,depthAxis]=cameraAxes();
   const u=(x-canvas.clientWidth/2-camera.x)/camera.scale;
   const v=(y-canvas.clientHeight/2-camera.y)/camera.scale;
@@ -913,7 +1061,7 @@ function ground([x,y], z=0) {
     if (Math.abs(depthAxis[2])<.03) return null;
     depth=(z-camera.center[2]-vertical)/depthAxis[2];
   }
-  const point=[0,1].map(i=>camera.center[i]+factor*(u*rightAxis[i]+v*downAxis[i])+depth*depthAxis[i]);
+  const point=/** @type {QreaseePoint2} */ ([0,1].map(i=>camera.center[i]+factor*(u*rightAxis[i]+v*downAxis[i])+depth*depthAxis[i]));
   return point.every(value=>Math.abs(value)<=20000) ? point : null;
 }
 
@@ -1185,6 +1333,17 @@ function draw() {
     arcPreview.forEach((world,i)=>{const [x,y]=stagePoint(world);if(i)ctx.lineTo(x,y);else ctx.moveTo(x,y);});
     ctx.strokeStyle='#bf671c';ctx.lineWidth=2;ctx.stroke();
   }
+  const linePreview=state.linePending?.preview;
+  if (linePreview?.length>1) {
+    const a=stagePoint(linePreview[0]), b=stagePoint(linePreview[1]);
+    if (Number.isFinite(a[0]) && Number.isFinite(b[0])) {
+      strokeLine(a,b,'#bf671c',2);
+      for (const [x,y] of [a,b]) {
+        ctx.beginPath();ctx.arc(x,y,3.5,0,Math.PI*2);
+        ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#bf671c';ctx.lineWidth=1.5;ctx.stroke();
+      }
+    }
+  }
   if (drag?.tool==='offset' && drag.contour?.length) {
     polygon(drag.contour.map(stagePoint));
     ctx.strokeStyle='#bf671c';ctx.lineWidth=2;ctx.stroke();
@@ -1223,7 +1382,16 @@ function draw() {
     ? camera.baseDistance/camera.distance : camera.scale/camera.base)*100) + '%';
   for (const peer of state.peers) {
     if (peer.cursor?.mode!=='model') continue;
-    const [x,y]=stagePoint([peer.cursor.x,peer.cursor.y,0]);
+    if (peer.cursor.line?.a && peer.cursor.line?.b) {
+      const a=stagePoint(peer.cursor.line.a), b=stagePoint(peer.cursor.line.b);
+      if (Number.isFinite(a[0]) && Number.isFinite(b[0])) {
+        ctx.save();
+        ctx.setLineDash([4,3]);
+        strokeLine(a,b,'#673dac',1.4);
+        ctx.restore();
+      }
+    }
+    const [x,y]=stagePoint([peer.cursor.x,peer.cursor.y,peer.cursor.z ?? 0]);
     if(!Number.isFinite(x)) continue;
     polygon([[x,y],[x+4,y+12],[x+7,y+7],[x+13,y+7]]);
     ctx.fillStyle='#673dac';
@@ -1237,17 +1405,25 @@ function draw() {
   drawAxes();
 }
 
+/** @param {QreaseeObject} object @returns {QreaseeMesh} */
 function previewMesh(object) {
   const w=object.width/2, d=object.depth/2;
   const angle=object.rotation*Math.PI/180, sin=Math.sin(angle), cos=Math.cos(angle);
+  /** @type {QreaseePoint2[]} */
   const outline = object.shape === 'line' ? [[-w,-d],[w,d]]
     : object.shape === 'rectangle' ? [[-w,-d],[w,-d],[w,d],[-w,d]]
     : object.shape==='polygon' ? object.profile.points.map(([x,y])=>[x*object.width,y*object.depth])
     : Array.from({length:48},(_,i) => [w*Math.cos(i*Math.PI/24),d*Math.sin(i*Math.PI/24)]);
+  /** @param {number} z @returns {QreaseePoint[]} */
   const layer = z => outline.map(([x,y]) => [object.x+x*cos-y*sin,object.y+x*sin+y*cos,z]);
   const n=outline.length;
   const vertices=layer(object.z);
+  /** @type {number[][]} */
   const faces=[];
+  if (object.shape==='line') {
+    vertices[1][2]+=object.height || 0;
+    return {vertices,faces,cut:false};
+  }
   if (n>2) {
     const base=Array.from({length:n},(_,i)=>i);
     const source=state.doc?.objects.findIndex(item=>item.id===object.id);
@@ -1258,7 +1434,7 @@ function previewMesh(object) {
         ...top.map(face=>face.map(i=>i+n)));
     } else faces.push(...top);
   }
-  return {vertices,faces};
+  return {vertices,faces,cut:false};
 }
 
 function contains(point,polygonPoints) {
@@ -1277,11 +1453,13 @@ function contains(point,polygonPoints) {
   return inside;
 }
 
+/** @param {PointerEvent} event @returns {QreaseePoint2} */
 function pointer(event) {
   const rect=canvas.getBoundingClientRect();
   return [event.clientX-rect.left,event.clientY-rect.top];
 }
 
+/** @param {QreaseePoint2} point @param {boolean} preferLine @returns {QreaseeHit|undefined} */
 function pickFace(point, preferLine) {
   const face=state.hits.findLast(candidate=>contains(point,candidate.points));
   if (preferLine && face?.object.shape==='polygon' && face.object.height===0) {
@@ -1322,6 +1500,7 @@ function orbitPivot(point) {
   return origin.map((value,i)=>value+t*ray[i]);
 }
 
+/** @param {number[]} point @param {number|undefined} elevation @param {Set<string>=} excluded @returns {QreaseeInference|null} */
 function infer(point, elevation, excluded = new Set()) {
   if (!state.snapping) return null;
   let best=null;
@@ -1357,6 +1536,7 @@ function infer(point, elevation, excluded = new Set()) {
   return best;
 }
 
+/** @param {QreaseePoint2} point @param {number=} elevation @returns {QreaseeInference|null} */
 function drawingPoint(point,elevation) {
   const face=elevation===undefined?pickFace(point,false):null;
   const surface=face?.world?.length && face.world.every(vertex=>Math.abs(vertex[2]-face.world[0][2])<.00001)
@@ -1366,10 +1546,11 @@ function drawingPoint(point,elevation) {
   if(hit) return hit;
   const xy=ground(point,z);
   if (!xy) return null;
-  return {world:[...(state.snapping?xy.map(value=>snap(value)):xy.map(round)),z],
+  return {world:/** @type {QreaseePoint} */ ([...(state.snapping?xy.map(value=>snap(value)):xy.map(round)),z]),
     label:state.snapping?'Grid '+lengthLabel(.25):''};
 }
 
+/** @param {QreaseePoint} a @param {QreaseePoint} b @param {QreaseePoint} bulge @returns {QreaseePoint[]} */
 function arcPoints(a,b,bulge) {
   const dx=b[0]-a[0],dy=b[1]-a[1],chord=Math.hypot(dx,dy);
   if (chord<.001) return [];
@@ -1394,15 +1575,22 @@ function addArc(points) {
   addLineChain(points,false,'Busur');
 }
 
+/** @param {QreaseePoint} a @param {QreaseePoint} b @param {string=} name @returns {QreaseeObject|null} */
+function lineObject(a,b,name='Garis') {
+  const width=b[0]-a[0], depth=b[1]-a[1], height=b[2]-a[2];
+  if (Math.hypot(width,depth,height)<=.001) return null;
+  return {id:identity(),name,shape:'line',x:(a[0]+b[0])/2,y:(a[1]+b[1])/2,z:a[2],
+    width,depth,height,rotation:0,color:'#dfcbb8'};
+}
+
+/** @param {QreaseePoint[]} points @param {boolean} closed @param {string} name */
 function addLineChain(points,closed,name) {
-  const segments=Array.from({length:closed?points.length:points.length-1},(_,i)=>{
-    const a=points[i],b=points[(i+1)%points.length];
-    return {id:identity(),name,shape:'line',x:(a[0]+b[0])/2,y:(a[1]+b[1])/2,z:a[2],
-      width:b[0]-a[0],depth:b[1]-a[1],height:0,rotation:0,color:'#dfcbb8'};
-  }).filter(item=>Math.hypot(item.width,item.depth)>.001);
+  const segments=Array.from({length:closed?points.length:points.length-1},(_,i)=>
+    lineObject(points[i],points[(i+1)%points.length],name)).filter(Boolean);
   if (segments.length) batch([],segments,[]);
 }
 
+/** @param {QreaseePoint[]} outline @param {number} distance @returns {QreaseePoint[]} */
 function offsetOutline(outline,distance) {
   const count=outline.length;
   const area=outline.reduce((sum,p,i)=>{const q=outline[(i+1)%count];return sum+p[0]*q[1]-q[0]*p[1]},0);
@@ -1437,10 +1625,25 @@ canvas.addEventListener('pointerdown',event=>{
     const pending=state.arcPending;
     const candidate=drawingPoint(start,pending.a[2]);
     const points=candidate?arcPoints(pending.a,pending.b,candidate.world):[];
-    if (!points.length) { status('Gerakkan kursor menjauh dari garis untuk menentukan lengkung busur.');return; }
+    if (!points.length) { showStatus('Gerakkan kursor menjauh dari garis untuk menentukan lengkung busur.');return; }
     state.arcPending=null;
     addArc(points);
     redraw();
+    return;
+  }
+  if (tool==='line') {
+    if (!state.doc || state.busy) return;
+    if (state.linePending) {
+      const candidate=drawingPoint(start);
+      if (!candidate) { showStatus('Arahkan kursor ke bidang untuk melanjutkan garis.');return; }
+      completeLinePoint(candidate.world);
+      return;
+    }
+    const initial=drawingPoint(start);
+    if (!initial) { showStatus('Gunakan denah atau tampilan 3D untuk menggambar.');return; }
+    state.linePress={start,initial:initial.world};
+    state.inference=initial;
+    canvas.setPointerCapture(event.pointerId);
     return;
   }
   if (tool === 'orbit' || tool === 'pan') {
@@ -1460,10 +1663,10 @@ canvas.addEventListener('pointerdown',event=>{
     }
     if (tool==='offset') {
       if (!object || state.inside || targetId(object)!==object.id || object.height!==0 || !['rectangle','circle'].includes(object.shape)) {
-        status('Offset tersedia untuk bidang persegi atau lingkaran datar di luar Group.');return;
+        showStatus('Offset tersedia untuk bidang persegi atau lingkaran datar di luar Group.');return;
       }
       const origin=ground(start,object.z);
-      if (!origin) {status('Gunakan denah atau tampilan 3D untuk Offset.');return;}
+      if (!origin) {showStatus('Gunakan denah atau tampilan 3D untuk Offset.');return;}
       const outline=previewMesh(object).vertices.slice(0,object.shape==='circle'?48:4);
       const area=outline.reduce((sum,p,i)=>{const q=outline[(i+1)%outline.length];return sum+p[0]*q[1]-q[0]*p[1]},0);
       let nearest=null;
@@ -1479,14 +1682,14 @@ canvas.addEventListener('pointerdown',event=>{
       const group=members(id);
       const sources=group.length?group:object?[object]:[];
       if (!sources.length || (group.length && group[0].container.definition)) {
-        status('Pilih objek atau Group. Untuk Component, gunakan Edit isi.');
+        showStatus('Pilih objek atau Group. Untuk Component, gunakan Edit isi.');
         return;
       }
       const pivot=[sources.reduce((sum,item)=>sum+item.x,0)/sources.length,
         sources.reduce((sum,item)=>sum+item.y,0)/sources.length];
       const initial=ground(start,object.z);
       const radius=initial && Math.hypot(initial[0]-pivot[0],initial[1]-pivot[1]);
-      if (!radius || radius<.01) { status('Mulai tarik di luar pusat objek.'); return; }
+      if (!radius || radius<.01) { showStatus('Mulai tarik di luar pusat objek.'); return; }
       select(id);
       state.drag={tool,start,object,sources,pivot,radius,elevation:object.z};
     } else if (tool==='rotate') {
@@ -1494,25 +1697,25 @@ canvas.addEventListener('pointerdown',event=>{
       const group=members(id);
       const sources=group.length?group:object?[object]:[];
       if (!sources.length || (group.length && group[0].container.definition)) {
-        status('Pilih objek atau Group. Untuk Component, gunakan Edit isi.');
+        showStatus('Pilih objek atau Group. Untuk Component, gunakan Edit isi.');
         return;
       }
       const midpoint=key=>sources.reduce((sum,item)=>sum+item[key],0)/sources.length;
       const pivot=[midpoint('x'),midpoint('y'),face.top?object.z+object.height:object.z];
       const initial=ground(start,pivot[2]);
       if (!initial || Math.hypot(initial[0]-pivot[0],initial[1]-pivot[1])<.01) {
-        status('Putar dari titik di luar pusat objek pada denah atau tampilan 3D.');
+        showStatus('Putar dari titik di luar pusat objek pada denah atau tampilan 3D.');
         return;
       }
       select(id);
       state.drag={tool,start,object,sources,pivot,initial:Math.atan2(initial[1]-pivot[1],initial[0]-pivot[0])};
     } else if (tool==='pull' || tool==='move') {
       if (!object || (tool==='pull' && !face.top)) {
-        status(tool==='pull'?'Pilih permukaan horizontal atas.':'Pilih objek yang akan dipindah.');
+        showStatus(tool==='pull'?'Pilih permukaan horizontal atas.':'Pilih objek yang akan dipindah.');
         return;
       }
       if (tool==='pull' && targetId(object)!==object.id) {
-        status('Gunakan tampilan 3D dan buka Edit isi untuk mengubah permukaan Group atau Component.');
+        showStatus('Gunakan tampilan 3D dan buka Edit isi untuk mengubah permukaan Group atau Component.');
         return;
       }
       const id=targetId(object);
@@ -1522,18 +1725,18 @@ canvas.addEventListener('pointerdown',event=>{
       const anchor=tool==='move' ? infer(start,undefined,new Set(objects().filter(item=>!owned.has(item.id)).map(item=>item.id))) : null;
       const elevation=anchor?.world[2]??object.z;
       const origin=ground(start,elevation);
-      if (tool==='move' && !origin) { status('Gunakan denah atau tampilan 3D untuk memindah.');return; }
+      if (tool==='move' && !origin) { showStatus('Gunakan denah atau tampilan 3D untuk memindah.');return; }
       select(id);
       state.drag={tool,start,object,sources,owned,elevation,origin,anchor:anchor?.world??[...(origin||[0,0]),elevation]};
     } else if (tool==='arc' && state.inside) {
-      status('Keluar dari Edit isi sebelum menggambar busur.');return;
+      showStatus('Keluar dari Edit isi sebelum menggambar busur.');return;
     } else if (tool==='arc' || tool==='measure') {
       const initial=drawingPoint(start);
-      if (!initial) { status('Gunakan denah atau tampilan 3D untuk mengukur.');return; }
+      if (!initial) { showStatus('Gunakan denah atau tampilan 3D untuk mengukur.');return; }
       state.drag={tool,start,initial:initial.world};
     } else {
       const initial=drawingPoint(start);
-      if (!initial) { status('Gunakan denah atau aksonometri untuk menggambar.');return; }
+      if (!initial) { showStatus('Gunakan denah atau aksonometri untuk menggambar.');return; }
       state.drag={tool,start,initial:initial.world,id:identity()};
     }
   }
@@ -1543,22 +1746,44 @@ canvas.addEventListener('pointerdown',event=>{
 canvas.addEventListener('pointermove',event=>{
   const point=pointer(event);
   const onGround=ground(point);
-  state.cursor=onGround?{mode:'model',x:round(onGround[0]),y:round(onGround[1])}:null;
+  state.cursor=onGround?{mode:'model',x:round(onGround[0]),y:round(onGround[1]),z:0}:null;
   updateCoordinates();
-  const drag=state.drag;
+  let drag=state.drag;
+  if (!drag && state.linePress &&
+      Math.hypot(point[0]-state.linePress.start[0],point[1]-state.linePress.start[1])>4) {
+    state.drag={tool:'line',start:state.linePress.start,initial:state.linePress.initial,id:identity()};
+    state.linePress=null;
+    drag=state.drag;
+  }
   if (!drag) {
-    if (state.tool==='arc' && state.arcPending) {
+    if (state.tool==='line' && state.linePending) {
+      if (document.activeElement!==$('#line-length') || !state.linePending.b) {
+        const candidate=drawingPoint(point);
+        state.linePending.b=candidate?.world||null;
+        state.linePending.preview=candidate?[state.linePending.a,candidate.world]:[state.linePending.a];
+        state.inference=candidate?.label?candidate:null;
+        updateLineLength();
+      }
+      const end=state.linePending.b;
+      if (end) {
+        state.cursor={mode:'model',x:round(end[0]),y:round(end[1]),z:round(end[2]),
+          line:{a:roundPoint(state.linePending.a),b:roundPoint(end)}};
+        updateCoordinates();
+      }
+    } else if (state.tool==='arc' && state.arcPending) {
       const candidate=drawingPoint(point,state.arcPending.a[2]);
       state.arcPending.preview=candidate?arcPoints(state.arcPending.a,state.arcPending.b,candidate.world):[];
       state.inference=candidate?.label?candidate:null;
-      status('Klik untuk menetapkan lengkung busur. Esc untuk membatalkan.');
+      showStatus('Klik untuk menetapkan lengkung busur. Esc untuk membatalkan.');
     } else if (state.tool==='move') {
       const hovered=pickFace(point,true)?.object;
       const id=targetId(hovered);
       const owned=new Set(members(id).length?members(id).map(item=>item.id):hovered?[hovered.id]:[]);
       state.inference=owned.size ? infer(point,undefined,new Set(objects().filter(item=>!owned.has(item.id)).map(item=>item.id))) : null;
     } else {
-      state.inference=['line','rectangle','circle','measure'].includes(state.tool) ? drawingPoint(point) : null;
+      const hit=['line','rectangle','circle','measure'].includes(state.tool) ? drawingPoint(point) : null;
+      state.inference=hit?.label?hit:null;
+      if (hit) state.cursor={mode:'model',x:round(hit.world[0]),y:round(hit.world[1]),z:round(hit.world[2])};
     }
     if (!state.inference?.label) state.inference=null;
     redraw();
@@ -1585,19 +1810,19 @@ canvas.addEventListener('pointermove',event=>{
     const limit=Math.min(drag.object.width,drag.object.depth)/2-.01;
     drag.distance=clamp(state.snapping?snap(raw,.05):round(raw),-limit,100);
     drag.contour=Math.abs(drag.distance)>.001?offsetOutline(drag.outline,drag.distance):null;
-    status('Offset '+lengthLabel(drag.distance));
+    showStatus('Offset '+lengthLabel(drag.distance));
   } else if (drag.tool==='arc') {
     const candidate=drawingPoint(point,drag.initial[2]);
     drag.end=candidate?.world||null;
     state.inference=candidate?.label?candidate:null;
-    if (drag.end) status('Klik berikutnya untuk menentukan lengkung busur.');
+    if (drag.end) showStatus('Klik berikutnya untuk menentukan lengkung busur.');
   } else if (drag.tool==='measure') {
     const candidate=drawingPoint(point,drag.initial[2]);
     if (!candidate) { drag.end=null;redraw();return; }
     drag.end=candidate.world;
     drag.distance=Math.hypot(drag.end[0]-drag.initial[0],drag.end[1]-drag.initial[1]);
     state.inference=candidate.label?candidate:null;
-    status('Jarak '+lengthLabel(drag.distance));
+    showStatus('Jarak '+lengthLabel(drag.distance));
   } else if (drag.tool==='scale') {
     const end=ground(point,drag.elevation);
     if (!end) { drag.updates=null;redraw();return; }
@@ -1608,7 +1833,7 @@ canvas.addEventListener('pointermove',event=>{
       y:drag.pivot[1]+(object.y-drag.pivot[1])*factor,
       width:object.width*factor,depth:object.depth*factor,height:object.height*factor
     }));
-    status('Skala '+factor.toFixed(2)+'×');
+    showStatus('Skala '+factor.toFixed(2)+'×');
   } else if (drag.tool==='rotate') {
     const end=ground(point,drag.pivot[2]);
     if (!end) { drag.updates=null;redraw();return; }
@@ -1623,7 +1848,7 @@ canvas.addEventListener('pointermove',event=>{
       y:y+(object.x-x)*sin+(object.y-y)*cos,
       rotation:((object.rotation+angle+180)%360+360)%360-180
     }));
-    status('Rotasi '+angle.toFixed(1)+'°');
+    showStatus('Rotasi '+angle.toFixed(1)+'°');
   } else if (drag.tool==='pull') {
     const {x,y,z,height}=drag.object;
     const current=stagePoint([x,y,z+height]), next=stagePoint([x,y,z+height+.1]);
@@ -1631,7 +1856,7 @@ canvas.addEventListener('pointermove',event=>{
     if (!Number.isFinite(slope) || Math.abs(slope)<.01) return;
     const value=height+dy/slope;
     drag.updates=[{...drag.object,height:Math.max(0,state.snapping?snap(value,.05):round(value))}];
-    status('Tinggi '+lengthLabel(drag.updates[0].height));
+    showStatus('Tinggi '+lengthLabel(drag.updates[0].height));
   } else if (drag.tool==='move') {
     const end=ground(point,drag.elevation);
     if (!end) { drag.updates=null;redraw();return; }
@@ -1641,7 +1866,7 @@ canvas.addEventListener('pointermove',event=>{
       : end.map((value,i)=>state.snapping?snap(value-drag.origin[i]):round(value-drag.origin[i]));
     drag.delta=delta;
     drag.updates=drag.sources.map(object=>({...object,x:object.x+delta[0],y:object.y+delta[1]}));
-    status(state.inference ? 'Snap '+state.inference.label+' · X '+state.inference.world[0].toFixed(3)+'  Y '+state.inference.world[1].toFixed(3)
+    showStatus(state.inference ? 'Snap '+state.inference.label+' · X '+state.inference.world[0].toFixed(3)+'  Y '+state.inference.world[1].toFixed(3)
       : 'Pindah · ΔX '+delta[0].toFixed(3)+'  ΔY '+delta[1].toFixed(3));
   } else {
     const a=drag.initial;
@@ -1661,6 +1886,7 @@ canvas.addEventListener('pointermove',event=>{
 });
 canvas.addEventListener('pointerleave',()=>{if (!state.layout) state.cursor=null;state.inference=null;redraw();});
 canvas.addEventListener('dblclick',event=>{
+  if (state.tool==='line' && state.linePending) { finishLine(); return; }
   if (state.tool!=='select') return;
   const face=state.hits.findLast(candidate=>contains(pointer(event),candidate.points));
   if (face?.object.container) enterContainer(face.object.container.id);
@@ -1669,6 +1895,14 @@ canvas.addEventListener('dblclick',event=>{
 canvas.addEventListener('pointerup',()=>{
   const drag=state.drag;
   state.drag=null;
+  if (state.linePress && !drag) {
+    const initial=state.linePress.initial;
+    state.linePress=null;
+    if (initial) beginLine(initial);
+    redraw();
+    return;
+  }
+  state.linePress=null;
   if (drag?.tool==='arc' && drag.end && Math.hypot(drag.end[0]-drag.initial[0],drag.end[1]-drag.initial[1])>.001) {
     state.arcPending={a:drag.initial,b:drag.end,preview:[drag.initial,drag.end]};
   } else if (drag?.tool==='offset' && drag.contour) {
@@ -1686,24 +1920,41 @@ canvas.addEventListener('pointerup',()=>{
   redraw();
 });
 canvas.addEventListener('lostpointercapture',()=>{
-  if (state.drag) { state.drag=null;redraw(); }
+  if (state.drag || state.linePress) { state.drag=null; state.linePress=null; redraw(); }
 });
 window.addEventListener('keydown',event=>{
   const dialog=document.querySelector('dialog[open]');
-  const typing=['INPUT','TEXTAREA','SELECT'].includes(event.target.tagName) || event.target.isContentEditable;
+  const target=/** @type {HTMLElement} */ (event.target);
+  const typing=['INPUT','TEXTAREA','SELECT'].includes(target.tagName) || target.isContentEditable;
   if (event.key==='Escape') {
     if (dialog) return;
     if (!$('#account-menu').hidden) {accountMenu(false);return;}
     if (state.drag) {state.drag=null;state.inference=null;setTool('select');redraw();return;}
     if (state.arcPending) {state.arcPending=null;state.inference=null;setTool('select');redraw();return;}
+    if (state.linePending) {finishLine();setTool('select');return;}
     if (typing) return;
     if (state.inside) {exitContainer();return;}
     if (!state.layout && state.tool!=='select') {setTool('select');state.inference=null;redraw();return;}
     if (state.selected.size) select(null);
     return;
   }
-  if (dialog || typing || ['BUTTON','SUMMARY'].includes(event.target.tagName)) return;
+  if (dialog || typing || ['BUTTON','SUMMARY'].includes(target.tagName)) return;
   const key=event.key.toUpperCase();
+  if (state.linePending && !state.layout && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    if (/^[0-9.]$/.test(event.key)) {
+      event.preventDefault();
+      const input=$('#line-length');
+      input.focus({preventScroll:true});
+      input.value=event.key==='.'?'0.':event.key;
+      input.dispatchEvent(new Event('input',{bubbles:true}));
+      return;
+    }
+    if (event.key==='Enter') {
+      event.preventDefault();
+      finishLine();
+      return;
+    }
+  }
   if ((event.ctrlKey||event.metaKey) && ['Z','Y'].includes(key)) {
     event.preventDefault();reverse(event.shiftKey||key==='Y');return;
   }
@@ -1734,6 +1985,7 @@ function drawSheet() {
   const add=(name,attrs,text)=>sheet.append(svg(name,attrs,text));
   add('rect',{x:9,y:9,width:402,height:279,fill:'none',stroke:'#33404c','stroke-width':.42});
   const text=(x,y,value,options={})=>add('text',{x,y,fill:'#23313b','font-family':'Segoe UI, Arial, sans-serif','font-size':3.2,...options},value);
+  /** @type {Array<{x: number, y: number, w: number, h: number, mode: QreaseeView, label: string, dimensions?: boolean}>} */
   const viewports=[
     {x:14,y:14,w:222,h:130,mode:'plan',label:'01  DENAH',dimensions:true},
     {x:242,y:14,w:164,h:130,mode:'iso',label:'02  AKSONOMETRI'},
