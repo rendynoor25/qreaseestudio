@@ -855,11 +855,29 @@ function selectConnected(object,additive=false) {
   showStatus(ids.length+' objek terhubung dipilih.');
 }
 
+/** @returns {QreaseeObject[]} */
+function deletionTargets() {
+  /** @type {Map<string, QreaseeObject>} */
+  const targets=new Map();
+  for (const id of state.selected) {
+    const group=members(id);
+    const candidates=group.length?group:objects().filter(object=>object.id===id);
+    for (const object of candidates) {
+      const linked=object.container?.definition && object.container.id===state.inside
+        ? linkedMembers(object) : [object];
+      for (const item of linked) targets.set(item.id,item);
+    }
+  }
+  return [...targets.values()];
+}
+
 function removeObject() {
-  const object = currentObject();
-  if (object) { edit(object, null); return; }
-  const group=members(onlySelected());
-  if (group.length) batch(group,[],[]);
+  if (!state.doc || state.busy || !state.selected.size) return;
+  const targets=deletionTargets();
+  if (!targets.length) return;
+  batch(targets,[],[]).then(deleted=>{
+    if (deleted) showStatus(targets.length===1?'Objek dihapus.':targets.length+' objek dihapus.');
+  });
 }
 
 $('#search').onfocus=()=>panel('objects',true);
@@ -2420,8 +2438,16 @@ window.addEventListener('keydown',event=>{
     if (state.selected.size) select(null);
     return;
   }
-  if (dialog || typing || ['BUTTON','SUMMARY'].includes(target.tagName)) return;
+  if (dialog || typing) return;
   const key=event.key.toUpperCase();
+  const buttonFocus=['BUTTON','SUMMARY'].includes(target.tagName);
+  if (key==='DELETE' || key==='BACKSPACE') {
+    if (state.layout || event.ctrlKey || event.metaKey || event.altKey) return;
+    event.preventDefault();
+    removeObject();
+    return;
+  }
+  if (buttonFocus) return;
   if (['line','rectangle','circle','arc','pull'].includes(state.tool) && !state.layout &&
       !event.ctrlKey && !event.metaKey && !event.altKey) {
     if (/^[0-9.,;xX.]$/.test(event.key)) {
@@ -2442,7 +2468,6 @@ window.addEventListener('keydown',event=>{
     state.drag=null;state.inference=null;
     setTool('select');redraw();return;
   }
-  if (key==='DELETE' || key==='BACKSPACE') { event.preventDefault();removeObject();return; }
   if (key==='F') { fit();return; }
   if (key==='G' || key==='Q') { event.preventDefault();createContainer(key==='Q');return; }
   const tool=Object.entries(tools).find(([,value])=>value[1]===key);
