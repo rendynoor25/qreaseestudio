@@ -173,6 +173,11 @@ function setTool(tool) {
     $('#line-length').value='';
   }
   state.tool = tool;
+  if (tool==='erase') {
+    state.selected.clear();
+    state.hoverKey=null;
+    state.inference=null;
+  }
   const measured=['line','rectangle','circle','arc','pull','rotate'].includes(tool);
   $('#line-length-control').hidden=!measured;
   $('#measure-label').textContent={line:'Panjang',rectangle:'X × Y',circle:'Radius',arc:'Radius, sudut',pull:'Jarak',rotate:'Sudut'}[tool]||'Ukuran';
@@ -956,6 +961,36 @@ function movePreview(sources,start,destination) {
   if (!destination) return null;
   const dx=destination[0]-start[0],dy=destination[1]-start[1];
   return sources.map(object=>({...object,x:object.x+dx,y:object.y+dy}));
+}
+
+/** @param {QreaseePoint2} point @param {Set<string>} seen */
+function eraseLinesAt(point,seen) {
+  for (const face of state.hits) {
+    if (face.object.shape!=='line' || targetId(face.object)!==face.object.id) continue;
+    if (contains(point,face.points)) seen.add(face.object.id);
+  }
+}
+
+/** @param {QreaseePoint2} start @param {QreaseePoint2} end @param {Set<string>} seen */
+function eraseLinesAlong(start,end,seen) {
+  const steps=Math.max(1,Math.ceil(Math.hypot(end[0]-start[0],end[1]-start[1])/3));
+  for (let i=0;i<=steps;i++) {
+    eraseLinesAt([start[0]+(end[0]-start[0])*i/steps,start[1]+(end[1]-start[1])*i/steps],seen);
+  }
+}
+
+/** @param {Set<string>} ids @returns {QreaseeObject[]} */
+function eraseLineTargets(ids) {
+  /** @type {Map<string, QreaseeObject>} */
+  const targets=new Map();
+  for (const id of ids) {
+    const object=objects().find(item=>item.id===id && item.shape==='line');
+    if (!object) continue;
+    const linked=object.container?.definition && object.container.id===state.inside
+      ? linkedMembers(object) : [object];
+    for (const item of linked) targets.set(item.id,item);
+  }
+  return [...targets.values()];
 }
 
 /** @param {QreaseePoint2} point @param {{z: number, excluded: Set<string>}} pending @returns {QreaseeInference|null} */
@@ -1916,6 +1951,15 @@ function draw() {
       if (!face.smooth && !face.quiet) ctx.stroke();
     }
   } else state.hits = [];
+  if (state.drag?.tool==='erase' && state.drag.seen?.size) {
+    for (const face of state.hits) {
+      if (face.object.shape!=='line' || !state.drag.seen.has(face.object.id)) continue;
+      polygon(face.points);
+      ctx.strokeStyle='#d9534f';
+      ctx.lineWidth=2.2;
+      ctx.stroke();
+    }
+  }
   if (drag?.tool==='select' && drag.current) {
     const left=Math.min(drag.start[0],drag.current[0]), top=Math.min(drag.start[1],drag.current[1]);
     const width=Math.abs(drag.current[0]-drag.start[0]), height=Math.abs(drag.current[1]-drag.start[1]);
@@ -2581,6 +2625,16 @@ canvas.addEventListener('pointerdown',event=>{
     state.drag={tool,start,camera:{...camera},axes,pivot,coordinates};
   } else {
     if (!state.doc || state.busy) return;
+    if (tool==='erase') {
+      const seen=new Set();
+      eraseLinesAt(start,seen);
+      state.drag={tool:'erase',start,seen,last:start};
+      state.inference=null;
+      state.hoverKey=null;
+      canvas.setPointerCapture(event.pointerId);
+      redraw();
+      return;
+    }
     let face=pickFace(start,tool!=='pull');
     let planeWall=null;
     if (tool==='rectangle'||tool==='circle') {
@@ -2649,10 +2703,6 @@ canvas.addEventListener('pointerdown',event=>{
       return;
     }
     const object=face?.object;
-    if (tool==='erase') {
-      if (object) { select(targetId(object)); removeObject(); }
-      return;
-    }
     if (tool==='offset') {
       if (!object || state.inside || targetId(object)!==object.id || object.wall_axis ||
           object.height!==0 || !['rectangle','circle'].includes(object.shape)) {
@@ -2832,6 +2882,12 @@ canvas.addEventListener('pointermove',event=>{
   }
   state.inference=null;
   const dx=point[0]-drag.start[0], dy=point[1]-drag.start[1];
+  if (drag.tool==='erase') {
+    eraseLinesAlong(drag.last,point,drag.seen);
+    drag.last=point;
+    redraw();
+    return;
+  }
   if (drag.tool==='orbit') {
     const speed=2*Math.PI/Math.max(480,canvas.clientHeight);
     camera.yaw=drag.camera.yaw-dx*speed;
@@ -2935,6 +2991,14 @@ canvas.addEventListener('pointerup',()=>{
   const drag=state.drag;
   state.drag=null;
   if (state.cursor) delete state.cursor.line;
+  if (drag?.tool==='erase') {
+    const targets=eraseLineTargets(drag.seen);
+    if (targets.length) batch(targets,[],[]).then(deleted=>{
+      if (deleted) showStatus(targets.length===1?'Garis dihapus.':targets.length+' garis dihapus.');
+    });
+    redraw();
+    return;
+  }
   if (state.linePress && !drag) {
     const initial=state.linePress.initial;
     state.linePress=null;
