@@ -936,8 +936,30 @@ function addObject(object) {
   })),[object.id]);
 }
 
+async function addLineObject(object) {
+  const split=state.inside?null:QreaseeLine.splitCrossingLines(objects(),object,identity);
+  if (split && (split.before.length || split.after.length>1)) return batch(split.before,split.after,[]);
+  return addObject(object);
+}
+
 /** @param {QreaseeObject} object @returns {QreaseePoint} */
 function surfaceNormal(object) {
+  if (object.solid_id && object.surface_role==='side') {
+    const bottom=objects().find(item=>item.solid_id===object.solid_id &&
+      item.surface_role==='bottom' && item.shape==='rectangle');
+    const top=objects().find(item=>item.solid_id===object.solid_id &&
+      item.surface_role==='top' && item.shape==='rectangle');
+    if (bottom && top) {
+      const {u,v,n}=faceFrame(bottom);
+      const center=[(bottom.x+top.x)/2,(bottom.y+top.y)/2,(bottom.z+top.z)/2];
+      const offset=[object.x-center[0],object.y-center[1],object.z-center[2]];
+      const axes=[u,v,n];
+      let index=0;
+      for (let i=1;i<3;i++) if (Math.abs(dotPoint(offset,axes[i]))>Math.abs(dotPoint(offset,axes[index]))) index=i;
+      const side=dotPoint(offset,axes[index]);
+      if (Math.abs(side)>1e-6) return /** @type {QreaseePoint} */ (axes[index].map(value=>Math.sign(side)*value));
+    }
+  }
   if (object.plane_u && object.plane_v) {
     const [u,v]=[object.plane_u,object.plane_v];
     return [u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
@@ -949,6 +971,17 @@ function surfaceNormal(object) {
 }
 /** @param {QreaseeObject} object @returns {QreaseePoint} */
 function surfaceCenter(object) {return [object.x,object.y,object.z];}
+/** @param {QreaseeObject} object @returns {{u: QreaseePoint, v: QreaseePoint, n: QreaseePoint}} */
+function faceFrame(object) {
+  const angle=object.rotation*Math.PI/180, cos=Math.cos(angle), sin=Math.sin(angle);
+  if (object.wall_axis) {
+    const [x,y]=object.wall_axis;
+    const u=/** @type {QreaseePoint} */ ([x*cos-y*sin,x*sin+y*cos,0]);
+    return {u,v:[0,0,1],n:[u[1],-u[0],0]};
+  }
+  return {u:[cos,sin,0],v:[-sin,cos,0],n:[0,0,1]};
+}
+const dotPoint=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 /** @param {QreaseePoint} point @param {number[]} delta @returns {QreaseePoint} */
 function offsetPoint(point,delta) {return [point[0]+delta[0],point[1]+delta[1],point[2]+delta[2]];}
 function shiftSurface(object,delta) {
@@ -1005,6 +1038,18 @@ function shellFromObject(source,extruded) {
 function insertRectangle(object,host) {
   if (!host || targetId(host)!==host.id || state.inside !== (host.container?.id??null))
     return addObject(object);
+  if (host.height===0 && !host.solid_id) {
+    const pair=QreaseeLine.splitRectanglePair(host,object);
+    if (!pair) return addObject(object);
+    const container=host.container??object.container??null;
+    const hostPieces=pair.host.map((geometry,index)=>({...host,...geometry,
+      id:index===0?host.id:identity(),name:index===0?host.name:'Bidang tepi'}));
+    const childPieces=pair.child.map((geometry,index)=>({...object,...geometry,container,
+      id:identity(),name:index===0?object.name:'Bidang tepi'}));
+    const intersection={...object,...pair.intersection,container,id:object.id,
+      name:pair.child.length?'Bidang potong':object.name};
+    return batch([host],[...hostPieces,...childPieces,intersection],[intersection.id]);
+  }
   let surface=host,others=[];
   if (host.height>0) {
     const shell=shellFromObject(host,host);
@@ -1088,6 +1133,59 @@ function pullCircleTop(before,after) {
   return {top:newTop,side:newSide,previous:side};
 }
 
+function rebuildRectangleSolid(before,after) {
+  const solidId=before.solid_id;
+  if (!solidId) return null;
+  const all=objects().filter(item=>item.solid_id===solidId);
+  const bottoms=all.filter(item=>item.surface_role==='bottom' && item.shape==='rectangle');
+  const tops=all.filter(item=>item.surface_role==='top' && item.shape==='rectangle');
+  if (bottoms.length!==1 || tops.length!==1 || all.some(item=>item.opening_id)) return null;
+  const bottom=bottoms[0],top=tops[0];
+  const {u,v,n}=faceFrame(bottom);
+  let origin=[bottom.x,bottom.y,bottom.z];
+  let width=bottom.width, depth=bottom.depth;
+  let height=dotPoint([top.x-origin[0],top.y-origin[1],top.z-origin[2]],n);
+  if (!(height>.001)) return null;
+  const moved=after.x!==before.x || after.y!==before.y || after.z!==before.z;
+  if (before.surface_role==='top') {
+    const center=[before.x,before.y,before.z];
+    const amount=moved?-after.height:after.height;
+    const target=center.map((value,i)=>value+n[i]*amount);
+    height=Math.max(.001,dotPoint([target[0]-origin[0],target[1]-origin[1],target[2]-origin[2]],n));
+  } else if (before.surface_role==='side') {
+    const normal=surfaceNormal(before);
+    const amount=moved
+      ? dotPoint([after.x-before.x,after.y-before.y,after.z-before.z],normal)
+      : after.height;
+    const alongU=dotPoint(normal,u), alongV=dotPoint(normal,v);
+    if (Math.abs(alongU)>.999) {
+      const next=Math.max(.002,width+amount), applied=next-width;
+      origin=origin.map((value,i)=>value+normal[i]*applied/2);
+      width=next;
+    } else if (Math.abs(alongV)>.999) {
+      const next=Math.max(.002,depth+amount), applied=next-depth;
+      origin=origin.map((value,i)=>value+normal[i]*applied/2);
+      depth=next;
+    } else return null;
+  } else return null;
+  const topCenter=origin.map((value,i)=>value+n[i]*height);
+  const bottomNext={...bottom,x:origin[0],y:origin[1],z:origin[2],
+    width,depth,height:0,solid_id:solidId,surface_role:'bottom',opening_id:null,opening_origin:null};
+  const topNext={...top,x:topCenter[0],y:topCenter[1],z:topCenter[2],
+    width,depth,height:0,solid_id:solidId,surface_role:'top',opening_id:null,opening_origin:null};
+  const parts=connectionFaces(bottomNext,topCenter,solidId);
+  const oldSides=all.filter(item=>item.surface_role==='side');
+  const newSides=parts.filter(item=>item.surface_role==='side');
+  newSides.forEach((side,index)=>{
+    const old=oldSides[index];
+    if (old) { side.id=old.id; side.name=old.name; side.color=old.color; }
+  });
+  const selected=before.surface_role==='top'
+    ? topNext.id
+    : newSides[oldSides.findIndex(item=>item.id===before.id)]?.id ?? before.id;
+  return {before:all,after:[bottomNext,topNext,...parts],selected};
+}
+
 function commitPull(before,after) {
   if (before.solid_id && before.opening_id &&
       ['top','pocket'].includes(before.surface_role)) {
@@ -1101,6 +1199,13 @@ function commitPull(before,after) {
     const targetOffset=normal.reduce((sum,value,i)=>sum+value*(target[i]-origin[i]),0);
     if (bottom && (targetOffset<-.001 || before.surface_role==='pocket'))
       return pocketOpening(before,bottom,target,origin);
+  }
+  if (before.solid_id && before.shape==='rectangle' &&
+      (before.surface_role==='top' || before.surface_role==='side')) {
+    const rebuilt=rebuildRectangleSolid(before,after);
+    if (rebuilt) return batch(rebuilt.before,rebuilt.after,[rebuilt.selected]);
+    showStatus('Sisi balok ini belum dapat ditarik karena memiliki bukaan.');
+    return Promise.resolve(false);
   }
   if (before.solid_id && before.surface_role==='top' && before.shape==='circle') {
     const pull=pullCircleTop(before,after);
@@ -2516,6 +2621,7 @@ canvas.addEventListener('pointerup',()=>{
       : object.width>.001 && object.depth>.001;
     if (valid) {
       if (drag.tool==='rectangle') insertRectangle(object,drag.host);
+      else if (drag.tool==='line') addLineObject(object);
       else addObject(object);
       $('#line-length').value='';
     }
