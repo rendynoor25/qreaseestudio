@@ -69,6 +69,10 @@ function demoMeshes(document) {
   return { meshes, plans };
 }
 
+function demoCommentTargetExists(document,target) {
+  return document.objects.some(object=>object.id===target || object.container?.id===target);
+}
+
 function demoApply(document, edit) {
   if (edit.type === 'sheet') {
     if (JSON.stringify(document.sheet) !== JSON.stringify(edit.before)) return 'conflict';
@@ -89,6 +93,31 @@ function demoApply(document, edit) {
       ? updates.has(object.id) ? [demoCopy(updates.get(object.id))] : [] : [object]);
     document.objects.push(...after.filter(object => !before.some(source => source.id === object.id)).map(demoCopy));
     if (document.objects.length > 250) return 'Batas demo adalah 250 objek.';
+    if (document.comments) document.comments=document.comments
+      .filter(comment=>demoCommentTargetExists(document,comment.target));
+  } else if (edit.type === 'comment') {
+    const comments=document.comments || [];
+    const before=edit.before || null;
+    const after=edit.after || null;
+    if (after) {
+      if (!after.id || !after.target || !String(after.text || '').trim()) return 'Komentar tidak valid.';
+      if (!demoCommentTargetExists(document,after.target)) return 'Objek target sudah tidak ada.';
+      if (before) {
+        const index=comments.findIndex(comment=>comment.id===before.id);
+        if (index<0 || JSON.stringify(comments[index])!==JSON.stringify(before)) return 'conflict';
+        comments[index]=demoCopy(after);
+      } else {
+        if (comments.some(comment=>comment.id===after.id)) return 'conflict';
+        if (comments.length>=200) return 'Batas demo adalah 200 komentar.';
+        comments.push(demoCopy(after));
+      }
+    } else {
+      if (!before) return 'Komentar tidak valid.';
+      const index=comments.findIndex(comment=>comment.id===before.id);
+      if (index<0 || JSON.stringify(comments[index])!==JSON.stringify(before)) return 'conflict';
+      comments.splice(index,1);
+    }
+    document.comments=comments;
   } else return 'Perintah tidak dikenal.';
   document.revision += 1;
   return null;
@@ -99,6 +128,7 @@ window.qreaseeDemoPost = async (url, request) => {
     const document = await seedDocument();
     if (request.blank) {
       document.objects = [];
+      document.comments = [];
       document.sheet.title = 'Proyek tanpa judul';
     }
     const room = crypto.randomUUID();

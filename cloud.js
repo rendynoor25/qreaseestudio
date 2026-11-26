@@ -30,6 +30,7 @@ window.qreaseeDemoPost = async (url, request) => {
       const document = await seedDocument();
       if (request.blank) {
         document.objects = [];
+        document.comments = [];
         document.sheet.title = 'Proyek tanpa judul';
       }
       const room = await cloudRpc('qreasee_create_room', { p_document: document });
@@ -47,7 +48,9 @@ window.qreaseeDemoPost = async (url, request) => {
       peers: payload.peers || [], topology: { added: [], removed: [] }
     } };
   } catch (error) {
+    const commentError=['invalid_comment','invalid_target','comment_limit'].includes(error.message);
     const code = error.message === 'room_missing' ? 404 : error.message === 'conflict' ? 409 :
+      commentError ? 422 :
       error.message === 'login_required' || error.status === 401 || error.status === 403 ? 401 : 503;
     let changes;
     if (code === 409) {
@@ -62,6 +65,7 @@ window.qreaseeDemoPost = async (url, request) => {
     }
     return { code, data: { error: code === 503 ? 'Ruang bersama belum siap: ' + error.message :
       code === 401 ? 'Sesi berakhir. Masuk kembali dengan Google.' :
+      code === 422 ? 'Komentar tidak valid atau objek target sudah dihapus.' :
       code === 409 ? 'Objek atau lembar sudah diubah di sesi lain.' : 'Ruang tidak ditemukan.',
       changes, peers: [] } };
   }
