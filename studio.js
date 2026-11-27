@@ -5751,10 +5751,10 @@ new ResizeObserver(()=>{
 
 const layoutDefaults=()=>({
   views:[
-    {id:'base-plan',mode:'plan',x:14,y:14,w:222,h:130,title:'DENAH',grid:false},
-    {id:'base-iso',mode:'iso',x:242,y:14,w:164,h:130,title:'AKSONOMETRI',grid:false},
-    {id:'base-front',mode:'front',x:14,y:150,w:222,h:98,title:'TAMPAK DEPAN',grid:false},
-    {id:'base-right',mode:'right',x:242,y:150,w:164,h:98,title:'TAMPAK KANAN',grid:false}
+    {id:'base-plan',mode:'plan',x:14,y:14,w:222,h:130,title:'DENAH',scale:undefined,grid:false},
+    {id:'base-iso',mode:'iso',x:242,y:14,w:164,h:130,title:'AKSONOMETRI',scale:undefined,grid:false},
+    {id:'base-front',mode:'front',x:14,y:150,w:222,h:98,title:'TAMPAK DEPAN',scale:undefined,grid:false},
+    {id:'base-right',mode:'right',x:242,y:150,w:164,h:98,title:'TAMPAK KANAN',scale:undefined,grid:false}
   ],texts:[],dimensions:[],gridLines:[]
 });
 const sheetLayout=()=>state.doc?.sheet.layout || layoutDefaults();
@@ -5780,11 +5780,11 @@ function nextGridName() {
   return candidate;
 }
 function layoutProjection(view) {
-  const scale=state.doc?.sheet.scale;
-  if(gridProjectionCache.meshes!==state.meshes||gridProjectionCache.plans!==state.plans||gridProjectionCache.scale!==scale){
-    gridProjectionCache={meshes:state.meshes,plans:state.plans,scale,entries:new Map()};
+  const scale=view.scale||state.doc?.sheet.scale;
+  if(gridProjectionCache.meshes!==state.meshes||gridProjectionCache.plans!==state.plans||gridProjectionCache.scale!==state.doc?.sheet.scale){
+    gridProjectionCache={meshes:state.meshes,plans:state.plans,scale:state.doc?.sheet.scale,entries:new Map()};
   }
-  const key=[view.id,view.mode,view.x,view.y,view.w,view.h].join(':');
+  const key=[view.id,view.mode,view.x,view.y,view.w,view.h,scale].join(':');
   if(gridProjectionCache.entries.has(key))return gridProjectionCache.entries.get(key);
   const raw=basis(views[view.mode][0],views[view.mode][1]);
   const meshes=view.mode==='plan'?state.plans:state.meshes;
@@ -5792,7 +5792,7 @@ function layoutProjection(view) {
   const {min,max}=points.length?bounds(points):{min:[-5,-5,-1],max:[5,5,3]};
   const spanX=Math.max(.05,max[0]-min[0]),spanY=Math.max(.05,max[1]-min[1]);
   const usableH=view.h-(view.mode==='plan'?35:19);
-  const factor=view.mode==='iso'?Math.min((view.w-20)/spanX,usableH/spanY):1000/state.doc.sheet.scale;
+  const factor=view.mode==='iso'?Math.min((view.w-20)/spanX,usableH/spanY):1000/scale;
   const center=[view.x+view.w/2,view.y+7+usableH/2];
   const project=world=>{const [a,b]=raw(world);return [
     center[0]+(a-(min[0]+max[0])/2)*factor-view.x,
@@ -5906,6 +5906,34 @@ function sheetPoint(event) {
   const point=new DOMPoint(event.clientX,event.clientY).matrixTransform(matrix.inverse());
   return [point.x,point.y];
 }
+function inlineLayoutEdit(element,value,maxLength,onSave) {
+  const box=element.getBBox();
+  const width=Math.min(285,Math.max(35,box.width+12));
+  const x=clamp(box.x,10,410-width),y=clamp(box.y-1,10,281);
+  const editor=svg('foreignObject',{x,y,width,height:9});
+  const input=document.createElement('input');
+  input.setAttribute('xmlns','http://www.w3.org/1999/xhtml');
+  input.setAttribute('aria-label','Edit teks pada lembar');
+  input.style.cssText='box-sizing:border-box;width:100%;height:100%;border:1px solid #ec8d35;border-radius:2px;background:white;color:#23313b;font:5px Segoe UI,sans-serif;padding:0 2px';
+  input.maxLength=maxLength;input.value=value;
+  editor.append(input);$('#sheet').append(editor);
+  input.focus();input.select();
+  let finished=false;
+  const finish=commit=>{
+    if(finished)return;
+    finished=true;editor.remove();
+    const next=input.value.trim();
+    if(commit&&next!==value)onSave(next);
+    else drawSheet();
+  };
+  input.addEventListener('pointerdown',event=>event.stopPropagation());
+  input.addEventListener('dblclick',event=>event.stopPropagation());
+  input.addEventListener('keydown',event=>{
+    if(event.key==='Enter'){event.preventDefault();finish(true);}
+    if(event.key==='Escape'){event.preventDefault();finish(false);}
+  });
+  input.addEventListener('blur',()=>finish(true));
+}
 function layoutViewAt(point) {
   return [...sheetLayout().views].reverse().find(view=>point[0]>=view.x && point[0]<=view.x+view.w &&
     point[1]>=view.y && point[1]<=view.y+view.h);
@@ -5919,10 +5947,11 @@ function selectLayoutItem(kind,id) {
   const item=kind==='text'?sheetLayout().texts.find(item=>item.id===id):null;
   const grid=kind==='grid'?(sheetLayout().gridLines||[]).find(item=>item.id===id):null;
   $('#layout-view-title-row').hidden=!view;
+  $('#layout-view-scale-row').hidden=!view||view.mode==='iso';
   $('#layout-text-row').hidden=!item;
   $('#layout-grid-name-row').hidden=!grid;
   $('#layout-grid-visibility').hidden=!grid;
-  if(view) $('#layout-view-title').value=view.title;
+  if(view){$('#layout-view-title').value=view.title;$('#layout-view-scale').value=String(view.scale||state.doc.sheet.scale);}
   if(item) $('#layout-text-value').value=item.text;
   if(grid) $('#layout-grid-name').value=grid.name;
   if(grid) $('#layout-grid-visibility').textContent=grid.hidden?'Tampilkan grid':'Sembunyikan grid';
@@ -5972,6 +6001,7 @@ function drawSheet() {
   let clipped=false;
   for (const view of viewports) {
     const {id,x,y,w,h,mode}=view,dimensions=mode==='plan';
+    const viewScale=view.scale||settings.scale;
     const frame=svg('g',{'data-view-id':id,class:[layoutSelected?.kind==='view'&&layoutSelected.id===id?'layout-selected':'',layoutActiveViewId===id?'layout-active':''].filter(Boolean).join(' ')});
     sheet.append(frame);
     const addView=(name,attrs,value)=>frame.append(svg(name,attrs,value));
@@ -5987,7 +6017,7 @@ function drawSheet() {
     const drawing=svg('g',{'clip-path':'url(#'+clipId+')'});
     frame.append(drawing);
     if(view.grid && mode!=='iso') {
-      const spacing=Math.max(18,Math.min(70,5000/settings.scale));
+      const spacing=Math.max(18,Math.min(70,5000/viewScale));
       const grid=svg('g',{'clip-path':'url(#'+clipId+')',stroke:'#c4cfd4','stroke-width':.18});
       for(let gx=x+spacing,i=0;gx<x+w-4;gx+=spacing,i++) {
         grid.append(svg('line',{x1:gx,y1:y+3,x2:gx,y2:y+h-14}));
@@ -6003,7 +6033,7 @@ function drawSheet() {
       const {min,max}=bounds(points);
       const spanX=Math.max(.05,max[0]-min[0]), spanY=Math.max(.05,max[1]-min[1]);
       const usableH=h-(dimensions?35:19);
-      const factor=mode==='iso' ? Math.min((w-20)/spanX,usableH/spanY) : 1000/settings.scale;
+      const factor=mode==='iso' ? Math.min((w-20)/spanX,usableH/spanY) : 1000/viewScale;
       const center=[x+w/2,y+7+usableH/2];
       const convert = ([a,b,c]) => [center[0]+(a-(min[0]+max[0])/2)*factor,
         center[1]+(b-(min[1]+max[1])/2)*factor,c];
@@ -6071,20 +6101,20 @@ function drawSheet() {
       for(const [s,e] of [[a,p1],[b,p2],[p1,p2]]) dimensionGroup.append(svg('line',{x1:s[0],y1:s[1],x2:e[0],y2:e[1],stroke:'#284c5e','stroke-width':.3}));
       dimensionGroup.append(svg('line',{x1:p1[0],y1:p1[1],x2:p2[0],y2:p2[1],stroke:'transparent','stroke-width':5}));
       for(const p of [p1,p2]) addView('circle',{cx:p[0],cy:p[1],r:.7,fill:'#284c5e'});
-      const metres=Math.hypot(bx-ax,by-ay)*settings.scale/1000;
+      const metres=Math.hypot(bx-ax,by-ay)*viewScale/1000;
       dimensionGroup.append(svg('text',{x:(p1[0]+p2[0])/2,y:(p1[1]+p2[1])/2-1.2,'text-anchor':'middle','font-family':'Segoe UI, Arial, sans-serif','font-size':3,fill:'#284c5e'},lengthLabel(metres)));
       frame.append(dimensionGroup);
     }
     const caption=mode==='plan'?view.title+'  /  POTONG '+lengthLabel(settings.cut_height):view.title;
-    viewText(x+3,y+h-5,caption,{'font-weight':700});
-    viewText(x+w-3,y+h-5,mode==='iso'?'TANPA SKALA':'1:'+settings.scale,{'text-anchor':'end',fill:'#52616d','font-size':2.9});
+    viewText(x+3,y+h-5,caption,{'font-weight':700,'data-view-caption':id});
+    viewText(x+w-3,y+h-5,mode==='iso'?'TANPA SKALA':'1:'+viewScale,{'text-anchor':'end',fill:'#52616d','font-size':2.9});
   }
   add('line',{x1:9,y1:254,x2:411,y2:254,stroke:'#33404c','stroke-width':.42});
   add('line',{x1:310,y1:254,x2:310,y2:288,stroke:'#33404c','stroke-width':.42});
   add('line',{x1:367,y1:254,x2:367,y2:288,stroke:'#33404c','stroke-width':.42});
   text(15,261,'PROYEK',{'font-size':2.9,'font-weight':700,fill:'#52616d'});
-  text(15,271,settings.title,{'font-size':5.5,'font-weight':700});
-  if(settings.room_title) text(15,278,settings.room_title,{'font-size':3.4,'font-weight':600});
+  text(15,271,settings.title,{'font-size':5.5,'font-weight':700,'data-sheet-field':'title'});
+  if(settings.room_title) text(15,278,settings.room_title,{'font-size':3.4,'font-weight':600,'data-sheet-field':'room_title'});
   const noteWords=settings.notes.replace(/\s+/g,' ').trim().split(' ');
   let noteLine='', noteY=284;
   for (const word of noteWords) {
@@ -6098,14 +6128,15 @@ function drawSheet() {
   const noteClip=svg('clipPath',{id:'clip-notes'});
   noteClip.append(svg('rect',{x:15,y:275,width:289,height:12}));
   sheet.append(noteClip);
-  text(15,noteY,noteLine,{'font-size':2.5,fill:'#52616d','clip-path':'url(#clip-notes)'});
+  text(15,noteY,noteLine,{'font-size':2.5,fill:'#52616d','clip-path':'url(#clip-notes)','data-sheet-field':'notes'});
   text(315,261,'FORMAT / SKALA',{'font-size':2.9,'font-weight':700,fill:'#52616d'});
-  text(315,269,'A3  /  1:'+settings.scale,{'font-size':4.5});
-  text(315,276,'DIGAMBAR  '+(settings.drawn_by||'—'),{'font-size':2.6});
-  text(315,282,'DIPERIKSA  '+(settings.checked_by||'—'),{'font-size':2.6});
+  const viewportScales=new Set(layout.views.filter(view=>view.mode!=='iso').map(view=>view.scale||settings.scale));
+  text(315,269,'A3  /  '+(viewportScales.size>1?'BERAGAM':'1:'+(viewportScales.values().next().value||settings.scale)),{'font-size':4.5});
+  text(315,276,'DIGAMBAR  '+(settings.drawn_by||'—'),{'font-size':2.6,'data-sheet-field':'drawn_by'});
+  text(315,282,'DIPERIKSA  '+(settings.checked_by||'—'),{'font-size':2.6,'data-sheet-field':'checked_by'});
   text(372,261,'NO. GAMBAR',{'font-size':2.9,'font-weight':700,fill:'#52616d'});
-  text(372,272,settings.number,{'font-size':4.6,'font-weight':700,'textLength':Math.min(33,Math.max(4,settings.number.length*2.8)),'lengthAdjust':'spacingAndGlyphs'});
-  if(settings.issue_date) text(372,283,settings.issue_date,{'font-size':2.7,fill:'#52616d'});
+  text(372,272,settings.number,{'font-size':4.6,'font-weight':700,'textLength':Math.min(33,Math.max(4,settings.number.length*2.8)),'lengthAdjust':'spacingAndGlyphs','data-sheet-field':'number'});
+  if(settings.issue_date) text(372,283,settings.issue_date,{'font-size':2.7,fill:'#52616d','data-sheet-field':'issue_date'});
   for(const item of layout.texts) {
     const draft=layoutDrag?.kind==='text'&&layoutDrag.id===item.id?layoutDrag:null;
     const x=draft?.x??item.x,y=draft?.y??item.y;
@@ -6171,7 +6202,7 @@ function addLayoutView(mode,point=[26,22]) {
   if (!state.doc || sheetLayout().views.length>=24) return;
   const names={plan:'DENAH',front:'TAMPAK DEPAN',right:'TAMPAK KANAN',iso:'AKSONOMETRI'};
   const view={id:identity(),mode,x:clamp(point[0],9,291),y:clamp(point[1],9,172),w:120,h:80,
-    title:names[mode],grid:false};
+    title:names[mode],scale:mode==='iso'?undefined:state.doc.sheet.scale,grid:false};
   const layout=sheetLayout();
   saveSheetLayout({...layout,views:[...layout.views,view]}).then(saved=>{
     if(saved) selectLayoutItem('view',view.id);
@@ -6183,7 +6214,7 @@ function layoutSnap(view,point) {
   const projected=meshes.flatMap(mesh=>mesh.vertices.map(raw));
   if (!projected.length) return [point[0]-view.x,point[1]-view.y];
   const {min,max}=bounds(projected),spanX=Math.max(.05,max[0]-min[0]),spanY=Math.max(.05,max[1]-min[1]);
-  const usableH=view.h-(view.mode==='plan'?35:19),factor=1000/state.doc.sheet.scale;
+  const usableH=view.h-(view.mode==='plan'?35:19),factor=1000/(view.scale||state.doc.sheet.scale);
   const center=[view.x+view.w/2,view.y+7+usableH/2];
   const candidates=projected.map(([a,b])=>[center[0]+(a-(min[0]+max[0])/2)*factor,
     center[1]+(b-(min[1]+max[1])/2)*factor]);
@@ -6194,6 +6225,7 @@ function layoutSnap(view,point) {
 }
 $('#sheet').addEventListener('pointerdown',event=>{
   if (event.button!==0 || !state.doc) return;
+  if(event.target.closest('[data-sheet-field],[data-view-caption]'))return;
   const point=sheetPoint(event);
   if (!point) return;
   const view=layoutViewAt(point);
@@ -6315,6 +6347,31 @@ $('#sheet').addEventListener('pointerup',event=>{
 });
 $('#sheet').addEventListener('pointercancel',()=>{layoutDrag=null;drawSheet();});
 $('#sheet').addEventListener('dblclick',event=>{
+  const caption=event.target.closest('[data-view-caption]');
+  if(caption){
+    const id=caption.getAttribute('data-view-caption');
+    const view=sheetLayout().views.find(item=>item.id===id);
+    if(view)inlineLayoutEdit(caption,view.title,80,title=>{
+      if(!title)return;
+      const layout=sheetLayout();
+      saveSheetLayout({...layout,views:layout.views.map(item=>item.id===id?{...item,title}:item)});
+    });
+    return;
+  }
+  const fieldElement=event.target.closest('[data-sheet-field]');
+  if(fieldElement){
+    const field=fieldElement.getAttribute('data-sheet-field');
+    const limits={title:80,room_title:80,notes:200,number:20,drawn_by:40,checked_by:40,issue_date:10};
+    if(!(field in limits))return;
+    inlineLayoutEdit(fieldElement,state.doc.sheet[field]||'',limits[field],value=>{
+      if((field==='title'||field==='number')&&!value)return;
+      if(field==='issue_date'&&value&&!/^\d{4}-\d{2}-\d{2}$/.test(value)){
+        showStatus('Tanggal gunakan format YYYY-MM-DD.');drawSheet();return;
+      }
+      edit(state.doc.sheet,{...state.doc.sheet,[field]:value},'sheet');
+    });
+    return;
+  }
   const id=event.target.closest('[data-view-id]')?.getAttribute('data-view-id') ||
     layoutViewAt(sheetPoint(event))?.id;
   if(id)enterLayoutView(id);
@@ -6356,6 +6413,13 @@ $('#layout-view-title').onchange=event=>{
   if(layoutSelected?.kind!=='view')return;
   const layout=sheetLayout(),title=event.target.value.trim();if(!title)return;
   saveSheetLayout({...layout,views:layout.views.map(item=>item.id===layoutSelected.id?{...item,title}:item)});
+};
+$('#layout-view-scale').onchange=event=>{
+  if(layoutSelected?.kind!=='view')return;
+  const scale=Number(event.target.value);
+  if(![25,50,75,100,150,200,500].includes(scale))return;
+  const layout=sheetLayout();
+  saveSheetLayout({...layout,views:layout.views.map(item=>item.id===layoutSelected.id?{...item,scale}:item)});
 };
 $('#layout-text-value').onchange=event=>{
   if(layoutSelected?.kind!=='text')return;
