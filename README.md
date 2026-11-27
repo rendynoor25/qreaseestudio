@@ -78,7 +78,7 @@ Untuk menguji kolaborasi antara dua PC pada Wi-Fi yang sama, jalankan server Rus
 
 ## Dashboard admin
 
-Halaman admin berada di `/admin.html` pada build cloud dengan Google Auth. Halaman ini hanya dapat dibaca setelah masuk dengan akun yang ada di allowlist `qreasee_admins`; email `rendynoorchandra@gmail.com` di-seed sebagai **super admin** oleh `supabase/007_admin.sql`. Link **Dashboard admin** muncul di menu akun Studio hanya untuk akun yang lolos pemeriksaan.
+Halaman admin berada di `/admin.html` pada build cloud dengan Google Auth; pada domain produksi: `https://qreasee.com/admin.html`. Halaman ini hanya dapat dibaca setelah masuk dengan akun yang ada di allowlist `qreasee_admins`; email `rendynoorchandra@gmail.com` di-seed sebagai **super admin** oleh `supabase/007_admin.sql`. Link **Dashboard admin** muncul di menu akun Studio hanya untuk akun yang lolos pemeriksaan.
 
 Bagian yang tersedia:
 
@@ -101,7 +101,7 @@ Untuk build demo lintas internet, set `QREASEE_CLOUD_DEMO=1`, `NEXT_PUBLIC_SUPAB
 
 Qreasee saat ini bukan aplikasi Next.js, jadi helper SSR dan middleware Next.js tidak dipakai. Klien demo memanggil Supabase REST RPC langsung dari browser.
 
-Demo cloud publik tersedia di [GitHub Pages](https://rendynoor25.github.io/qreaseestudio/). Halaman awal menyediakan proyek kosong, contoh, dan proyek terakhir yang dibuka. Daftar terbaru tersimpan di browser; pada build dengan Google Auth daftar juga disimpan di metadata akun sehingga tersedia di perangkat lain. Tautan proyek lama dengan `#UUID` tetap langsung membuka model. Untuk publikasi ulang, jalankan build cloud lalu unggah aset di `dist` ke cabang `gh-pages`. Path aset pada build memakai direktori situs saat ini sehingga tautan Pages dapat dibuka dari `/qreaseestudio/`. Jalankan `node scripts/test-cloud.cjs` untuk menguji sinkronisasi dua klien, konflik, dan penggabungan edit; tes ini membuat satu ruang kecil di Supabase.
+Demo cloud publik tersedia di [qreasee.com](https://qreasee.com/) (cadangan: [GitHub Pages](https://rendynoor25.github.io/qreaseestudio/)). Halaman awal menyediakan proyek kosong, contoh, dan proyek terakhir yang dibuka. Daftar terbaru tersimpan di browser; pada build dengan Google Auth daftar juga disimpan di metadata akun sehingga tersedia di perangkat lain. Tautan proyek lama dengan `#UUID` tetap langsung membuka model. Untuk publikasi ulang, jalankan build cloud lalu unggah aset di `dist` ke cabang `gh-pages`. Path aset pada build memakai direktori situs saat ini sehingga tautan Pages dapat dibuka dari `/qreaseestudio/`. Jalankan `node scripts/test-cloud.cjs` untuk menguji sinkronisasi dua klien, konflik, dan penggabungan edit; tes ini membuat satu ruang kecil di Supabase.
 
 ### Mode masuk dengan Google
 
