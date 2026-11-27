@@ -3534,6 +3534,10 @@ $('#skp-file').onchange = async event => {
     const imported = importSkp(await file.arrayBuffer(), file.name);
     if (state.doc.objects.length + imported.length > 250) throw new Error('Ruang model melebihi batas 250 objek.');
     if (JSON.stringify({type:'batch',before:[],after:imported}).length > 200_000) throw new Error('Impor terlalu besar untuk satu perubahan kolaborasi.');
+    const deadline=Date.now()+6000;
+    while (state.busy && Date.now()<deadline)
+      await new Promise(resolve=>setTimeout(resolve,100));
+    if (state.busy) throw new Error('Penyimpanan masih berjalan. Coba impor lagi sesaat lagi.');
     const saved = await batch([], imported, [imported[0].container.id]);
     if (saved) showStatus(`${imported.length} bagian SketchUp berhasil diimpor.`);
   } catch (error) {

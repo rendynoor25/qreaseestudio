@@ -110,3 +110,5 @@ Coba gratis: https://qreasee.com/
 3. Taruh link di baris terpisah agar mudah diklik.
 4. Untuk grup besar, kirim pada jam kerja (08.00–10.00 atau 13.00–15.00) dan hindari jam sibuk.
 5. Siapkan jawaban singkat untuk pertanyaan: “Apakah bisa impor Revit/IFC?” — saat ini alur utamanya DWG dan SKP; kebutuhan IFC bisa dicatat sebagai masukan roadmap.
+6. Batas impor SKP saat ini: 20 MB, maksimum 2.000 segitiga, dan 150 KB data. Untuk model besar, gunakan DWG/OBJ atau kirim model yang sudah diringkas.
+7. Tautan proyek adalah undangan kolaborasi. Pemilik dapat mengatur akses tautan: *Dapat mengedit*, *Dapat berkomentar*, atau *Hanya melihat*.
