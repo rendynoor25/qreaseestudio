@@ -4001,10 +4001,10 @@ function drawMaterialTexture(face) {
       line(minU,value+.012,maxU,value+.012,bevel,.6);
     }
   } else if (preset.pattern==='glass') {
-    ctx.fillStyle='#ffffff22';ctx.fillRect(left,top,right-left,bottom-top);
+    ctx.fillStyle='#ffffff12';ctx.fillRect(left,top,right-left,bottom-top);
     const step=tile*1.4;
     for (let offset=minV-minU;offset<=maxV-minU;offset+=step)
-      line(minU,minU+offset,maxU,maxU+offset,'#ffffff50',1.4);
+      line(minU,minU+offset,maxU,maxU+offset,'#ffffff3a',1.2);
   } else if (preset.pattern==='grass'||preset.pattern==='sand'||preset.pattern==='asphalt') {
     const count=clamp(Math.round(spanU*spanV/(tile*tile)*6),16,140);
     for (let i=0;i<count;i++) {
@@ -4155,10 +4155,17 @@ function draw() {
         const hiddenFace=state.showHidden&&face.object.hidden;
         const grayFace=state.showHidden&&!face.object.hidden;
         const outsideContext=Boolean(state.inside)&&face.object.container?.id!==state.inside;
+        const glassFace=face.object.material==='glass'&&!hiddenFace&&!grayFace&&
+          !outsideContext&&!face.section;
         ctx.fillStyle = hiddenFace ? shade('#e8932a',Math.max(.8,face.tone)) :
           grayFace||outsideContext ? shade('#aeb4ba',face.tone) :
           shade(face.object.color,face.section ? .9 : face.tone);
-        ctx.fill();
+        if (glassFace) {
+          ctx.save();
+          ctx.globalAlpha=.26;
+          ctx.fill();
+          ctx.restore();
+        } else ctx.fill();
         if (!state.showHidden&&!outsideContext) drawMaterialTexture(face);
         if (selected || hovered) {
           ctx.save();
