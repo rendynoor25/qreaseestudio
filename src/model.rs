@@ -468,6 +468,8 @@ pub struct SheetView {
     pub w: f64,
     pub h: f64,
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<u32>,
     #[serde(default)]
     pub grid: bool,
 }
@@ -528,6 +530,7 @@ impl SheetLayout {
             && self.views.iter().all(|view| {
                 !view.id.is_empty() && ["plan", "front", "right", "iso"].contains(&view.mode.as_str())
                     && !view.title.trim().is_empty() && view.title.chars().count() <= 80
+                    && view.scale.is_none_or(|scale| [25, 50, 75, 100, 150, 200, 500].contains(&scale))
                     && [view.x, view.y, view.w, view.h].iter().all(|v| v.is_finite())
                     && view.x >= 9.0 && view.y >= 9.0 && view.w >= 30.0 && view.h >= 25.0
                     && view.x + view.w <= 411.0 && view.y + view.h <= 252.0
@@ -1207,7 +1210,7 @@ mod tests {
         sheet.layout = Some(SheetLayout {
             views: vec![SheetView {
                 id: "view-1".into(), mode: "plan".into(), x: 14.0, y: 14.0,
-                w: 222.0, h: 130.0, title: "DENAH".into(), grid: true,
+                w: 222.0, h: 130.0, title: "DENAH".into(), scale: Some(100), grid: true,
             }],
             texts: vec![SheetText {
                 id: "text-1".into(), x: 20.0, y: 30.0,
@@ -1224,6 +1227,9 @@ mod tests {
         assert!(sheet.valid());
         let restored: Sheet = serde_json::from_value(serde_json::to_value(&sheet).unwrap()).unwrap();
         assert_eq!(restored, sheet);
+        sheet.layout.as_mut().unwrap().views[0].scale = Some(17);
+        assert!(!sheet.valid());
+        sheet.layout.as_mut().unwrap().views[0].scale = Some(100);
         sheet.layout.as_mut().unwrap().views[0].mode = "iso".into();
         assert!(!sheet.valid());
     }
@@ -1234,7 +1240,7 @@ mod tests {
         sheet.layout = Some(SheetLayout {
             views: vec![SheetView {
                 id: "plan".into(), mode: "plan".into(), x: 14.0, y: 14.0,
-                w: 180.0, h: 110.0, title: "DENAH".into(), grid: false,
+                w: 180.0, h: 110.0, title: "DENAH".into(), scale: None, grid: false,
             }],
             texts: vec![SheetText {
                 id: "room".into(), x: 50.0, y: 50.0, text: "Ruang A".into(),

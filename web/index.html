@@ -157,7 +157,7 @@
             <button draggable="true" data-view-mode="iso" type="button">Aksonometri</button>
           </div>
           <div id="layout-view-tools" class="layout-view-tools" hidden><h2>Alat dalam view</h2><p class="layout-side-hint">Grid: klik kepala, lalu ekor. Dimensi: klik dua batang grid.</p><div class="layout-tool-list"><button type="button" class="layout-tool active" data-layout-tool="select">Pilih</button><button type="button" class="layout-tool" data-layout-tool="grid">Grid</button><button type="button" class="layout-tool" data-layout-tool="dimension">Dimensi</button><button type="button" class="layout-tool" data-layout-tool="text">Teks</button></div></div>
-          <div id="layout-selection" class="layout-selection" hidden><h2>Item terpilih</h2><label id="layout-view-title-row">Judul view<input id="layout-view-title" maxlength="80"></label><label id="layout-grid-name-row" hidden>Nama grid<input id="layout-grid-name" maxlength="12"></label><button id="layout-grid-visibility" type="button" hidden>Sembunyikan grid</button><label id="layout-text-row" hidden>Teks<textarea id="layout-text-value" rows="3" maxlength="150"></textarea></label><button id="layout-delete" type="button">Hapus dari lembar</button></div>
+          <div id="layout-selection" class="layout-selection" hidden><h2>Item terpilih</h2><label id="layout-view-title-row">Judul view<input id="layout-view-title" maxlength="80"></label><label id="layout-view-scale-row" hidden>Skala view<select id="layout-view-scale"><option value="25">1:25</option><option value="50">1:50</option><option value="75">1:75</option><option value="100">1:100</option><option value="150">1:150</option><option value="200">1:200</option><option value="500">1:500</option></select></label><label id="layout-grid-name-row" hidden>Nama grid<input id="layout-grid-name" maxlength="12"></label><button id="layout-grid-visibility" type="button" hidden>Sembunyikan grid</button><label id="layout-text-row" hidden>Teks<textarea id="layout-text-value" rows="3" maxlength="150"></textarea></label><button id="layout-delete" type="button">Hapus dari lembar</button></div>
           <details class="layout-title-details" open><summary>Title block</summary><div id="layout-side-properties"></div></details>
         </aside>
       </div>
@@ -218,7 +218,7 @@
           <label>Digambar oleh<input name="drawn_by" maxlength="40"></label>
           <label>Diperiksa oleh<input name="checked_by" maxlength="40"></label>
           <label>Tanggal gambar<input name="issue_date" type="date"></label>
-          <label>Skala ortografis<select name="scale">
+          <label>Skala awal view<select name="scale">
             <option value="25">1:25</option><option value="50">1:50</option><option value="75">1:75</option><option value="100">1:100</option><option value="150">1:150</option><option value="200">1:200</option><option value="500">1:500</option>
           </select></label>
           <label>Elevasi potong denah (<span class="unit-label">m</span>)<input name="cut_height" type="number" step="any" required></label>
