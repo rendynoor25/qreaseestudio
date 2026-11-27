@@ -3361,6 +3361,45 @@ function commitPull(before,after) {
   return edit(before,after);
 }
 
+/** Distance from an opening's host plane to the opposite face of the same solid. */
+function openingThroughOffset(face) {
+  if (!face?.solid_id || !face.opening_id || !['top','side','pocket'].includes(face.surface_role))
+    return null;
+  const origin=face.opening_origin??surfaceCenter(face);
+  const normal=surfaceNormal(face);
+  const sideOpening=face.surface_role==='side'||
+    (face.surface_role==='pocket'&&Boolean(face.wall_axis));
+  const bottom=sideOpening
+    ? objects().find(item=>item.id!==face.id&&item.solid_id===face.solid_id&&
+        item.surface_role==='side'&&item.shape==='rectangle'&&
+        dotPoint(surfaceNormal(item),normal)<-.999&&
+        QreaseeLine.splitRectangle(item,openingProjection(face,item)))
+    : objects().find(item=>item.solid_id===face.solid_id&&item.surface_role==='bottom'&&
+        item.shape==='rectangle'&&
+        QreaseeLine.splitRectangle(item,openingProjection(face,item)));
+  if (!bottom) return null;
+  return normal.reduce((sum,value,i)=>sum+value*(surfaceCenter(bottom)[i]-origin[i]),0);
+}
+
+/** Push an opening straight through its block, creating a clean hole. */
+function pushThroughOpening(face) {
+  const opposite=openingThroughOffset(face);
+  if (opposite===null||opposite>=-.001) return false;
+  const origin=face.opening_origin??surfaceCenter(face);
+  const normal=surfaceNormal(face);
+  const target=origin.map((value,i)=>value+normal[i]*(opposite-.002));
+  state.drawPending=null;
+  state.drag=null;
+  state.linePress=null;
+  state.inference=null;
+  state.selected.delete(face.id);
+  const result=commitPull(face,{...face,x:target[0],y:target[1],z:target[2],height:0});
+  if (result&&typeof result.then==='function')
+    result.then(saved=>{if (saved) showStatus('Bukaan menembus balok dibuat.');});
+  else if (result) showStatus('Bukaan menembus balok dibuat.');
+  return true;
+}
+
 function enterContainer(id) {
   if (!members(id).length) return;
   state.inside=id;
@@ -5501,9 +5540,15 @@ canvas.addEventListener('pointermove',event=>{
 canvas.addEventListener('pointerleave',()=>{if (!state.layout) state.cursor=null;state.hoverKey=null;state.sectionHover=null;state.offsetHover=null;hoverGridId=null;state.inference=null;redraw();});
 canvas.addEventListener('dblclick',event=>{
   if (state.tool==='line' && state.linePending) { finishLine(); return; }
+  if (!['select','bucket','pull'].includes(state.tool)) return;
+  const point=pointer(event);
+  const under=state.hits.filter(candidate=>contains(point,candidate.points));
+  const face=under.findLast(candidate=>candidate.object.opening_id)||under.at(-1);
+  if (!face) return;
+  const sameContext=!face.object.container||state.inside===face.object.container.id;
+  if (sameContext&&['select','pull'].includes(state.tool)&&pushThroughOpening(face.object)) return;
   if (!['select','bucket'].includes(state.tool)) return;
-  const face=state.hits.findLast(candidate=>contains(pointer(event),candidate.points));
-  if (face?.object.container) enterContainer(face.object.container.id);
+  if (face.object.container) enterContainer(face.object.container.id);
 });
 
 canvas.addEventListener('click',event=>{
