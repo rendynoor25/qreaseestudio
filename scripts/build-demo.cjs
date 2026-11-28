@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
+require('./build-studio.cjs');
 require('./build-line.cjs');
 require('./build-cad.cjs');
 const output = path.join(root, 'dist');

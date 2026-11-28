@@ -11,7 +11,7 @@ function build(source, output) {
     bundle: true, minify: true, format: 'esm', platform: 'browser', target: 'es2022'
   }).outputFiles[0].text;
   if (process.argv.includes('--check')) {
-    if (fs.readFileSync(outfile, 'utf8') !== content)
+    if (fs.readFileSync(outfile, 'utf8').replace(/\r\n/g, '\n') !== content)
       throw new Error(`web/${output} is stale. Run npm run build:cad and commit the generated file.`);
   } else fs.writeFileSync(outfile, content);
 }

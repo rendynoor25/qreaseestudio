@@ -14,6 +14,6 @@ const output = esbuild.buildSync({
   target: 'es2022'
 }).outputFiles[0].text.replace(/(?:\.\.\/)+node_modules\//g, 'node_modules/');
 if (process.argv.includes('--check')) {
-  if (fs.readFileSync(outfile, 'utf8') !== output)
+  if (fs.readFileSync(outfile, 'utf8').replace(/\r\n/g, '\n') !== output)
     throw new Error('web/line-geometry.js is stale. Run npm run build:line and commit the generated file.');
 } else fs.writeFileSync(outfile, output);

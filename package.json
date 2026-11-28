@@ -2,7 +2,8 @@
   "private": true,
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
-    "check:generated": "node scripts/build-line.cjs --check && node scripts/build-cad.cjs --check",
+    "check:generated": "node scripts/build-studio.cjs --check && node scripts/build-line.cjs --check && node scripts/build-cad.cjs --check",
+    "build:studio": "node scripts/build-studio.cjs",
     "verify": "npm run check && npm run check:generated && node scripts/test-line-geometry.cjs && cargo test --locked",
     "test:geometry": "node scripts/build-line.cjs && node scripts/test-line-geometry.cjs",
     "build:line": "node scripts/build-line.cjs",
