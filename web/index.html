@@ -37,6 +37,7 @@
     <div class="project">
       <span data-icon="folder" aria-hidden="true"></span>
       <strong id="project-title">Qreasee</strong>
+      <button class="project-rename" id="rename-project" type="button" title="Ganti nama proyek" aria-label="Ganti nama proyek" data-icon="pencil"></button>
       <details id="file-menu">
         <summary title="Menu proyek" aria-label="Menu proyek" data-icon="chevron"></summary>
         <div class="dropdown">
@@ -54,6 +55,15 @@
       <div class="history-actions">
         <button class="icon-button" id="undo" title="Urungkan (Ctrl+Z)" aria-label="Urungkan" data-icon="undo"></button>
         <button class="icon-button" id="redo" title="Ulangi (Ctrl+Shift+Z)" aria-label="Ulangi" data-icon="redo"></button>
+        <button class="icon-button" id="import-skp-quick" type="button" title="Impor SketchUp (.skp)" aria-label="Impor SketchUp" data-icon="upload"></button>
+        <details id="export-quick-menu" class="header-action-menu">
+          <summary class="icon-button" title="Ekspor file" aria-label="Ekspor file" data-icon="download"></summary>
+          <div class="dropdown">
+            <button id="export-model-quick" type="button">Model DWG</button>
+            <button id="export-layout-quick" type="button">Layout DWG</button>
+            <button id="export-data-quick" type="button">Data proyek (.json)</button>
+          </div>
+        </details>
       </div>
     </div>
     <nav class="modes" aria-label="Ruang kerja">
@@ -251,6 +261,17 @@
     <button id="object-menu-section-delete" role="menuitem" class="danger" hidden>Hapus bidang</button>
     <button id="object-menu-hide" role="menuitem" hidden>Sembunyikan objek</button>
   </div>
+  <dialog id="rename-project-dialog" class="share-dialog">
+    <form id="rename-project-form">
+      <h2>Nama proyek</h2>
+      <p>Nama ini tampil pada proyek bersama dan menjadi nama file saat diunduh.</p>
+      <label>Nama proyek<input id="rename-project-name" maxlength="80" required></label>
+      <div class="dialog-actions">
+        <button id="rename-project-cancel" type="button">Batal</button>
+        <button class="share" type="submit">Simpan nama</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="share-dialog" class="share-dialog">
     <form method="dialog" class="dialog-head"><h2>Bagikan proyek</h2><button aria-label="Tutup" data-icon="close"></button></form>
     <section class="share-section">

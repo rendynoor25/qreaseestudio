@@ -47,7 +47,9 @@ const icons = {
   reverse:'<path d="M4 7h13m0 0-3-3m3 3-3 3M20 17H7m0 0 3-3m-3 3 3 3"/>',
   orbit:'<ellipse cx="12" cy="12" rx="9" ry="5.5" transform="rotate(-28 12 12)"/><path d="M8 4a8 8 0 0 1 12 5m-2-4 2 4 2-4M10 20a8 8 0 0 1-6-5"/>',
   pan:'<path d="M8 13V6a1.5 1.5 0 0 1 3 0v5-7a1.5 1.5 0 0 1 3 0v7-5a1.5 1.5 0 0 1 3 0v6-3a1.5 1.5 0 0 1 3 0v6c0 4-2 6-6 6h-2a5 5 0 0 1-4-2l-4-5a1.6 1.6 0 0 1 2.5-2z"/>',
-  download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/>'
+  download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/>',
+  upload:'<path d="M12 17V5m-5 5 5-5 5 5M4 17v4h16v-4"/>',
+  pencil:'<path d="m4 20 4.5-1 11-11a2 2 0 0 0-3-3l-11 11L4 20zM14 7l3 3"/>'
 };
 function icon(element, name) {
   if (!Object.prototype.hasOwnProperty.call(icons,name)) return;
@@ -93,7 +95,7 @@ const state = {
   doc: null, meshes: [], plans: [], selected: new Set(), inside: null, tool: 'select', layout: false, busy: false,
   snapping: true, inference: null,
   undo: [], redo: [], drag: null, arcPending:null, linePending:null, linePress:null, drawPending:null,
-  movePending:null, rotatePending:null, offsetPending:null, offsetHover:null, measurePending:null, sectionPending:null, sectionHover:null, hits: [], hoverKey: null, epoch: 0, polling: false, peers:[], cursor:null, canManageShare:true, shareRole:'edit', showHidden:false
+  movePending:null, rotatePending:null, offsetPending:null, offsetHover:null, measurePending:null, sectionPending:null, sectionHover:null, hits: [], hoverKey: null, epoch: 0, polling: false, syncFailures:0, peers:[], cursor:null, canManageShare:!window.qreaseeCloudPost, shareRole:'edit', showHidden:false
 };
 const canvas = $('#viewport');
 const ctx = canvas.getContext('2d');
@@ -734,6 +736,8 @@ async function openRoom(createBlank) {
   state.undo = [];
   state.redo = [];
   state.polling = false;
+  state.syncFailures = 0;
+  state.canManageShare = !window.qreaseeCloudPost;
   state.peers = [];
   state.cursor = null;
   state.hoverKey = null;
@@ -793,17 +797,17 @@ function accept(data) {
   }
   const avatars = $('#avatars');
   const peers = [...(data.peers || [])].sort((a,b) => Number(b.id === state.client) - Number(a.id === state.client));
-  const signature=peers.map(({id,name})=>id+name).sort().join('|');
+  const signature=(data.online_count ?? peers.length)+'|'+peers.map(({id,name})=>id+name).sort().join('|');
   if (avatars.dataset.signature!==signature) {
     avatars.dataset.signature=signature;
     avatars.replaceChildren();
-    renderAvatars(avatars,peers);
+    renderAvatars(avatars,peers,data.online_count ?? peers.length);
   }
   const others=peers.filter(peer=>peer.id!==state.client).sort((a,b)=>a.id.localeCompare(b.id));
   const cursorChanged=JSON.stringify(state.peers)!==JSON.stringify(others);
   state.peers=others;
   if ($('#share-dialog').open) renderShareDialog();
-  connection(true, window.qreaseeCloudPost ? peers.length + ' online' :
+  connection(true, window.qreaseeCloudPost ? (data.online_count ?? peers.length) + ' online' :
     window.qreaseeDemoPost ? 'Lokal' : peers.length + ' online');
   if (cursorChanged) {
     if (state.layout) drawLayoutCursors();
@@ -811,8 +815,8 @@ function accept(data) {
   }
 }
 
-/** @param {Element} avatars @param {QreaseePeer[]} peers */
-function renderAvatars(avatars,peers) {
+/** @param {Element} avatars @param {QreaseePeer[]} peers @param {number} onlineCount */
+function renderAvatars(avatars,peers,onlineCount) {
   for (const peer of peers.slice(0, 4)) {
     const own=peer.id===state.client;
     const item = /** @type {any} */ (document.createElement(own?'button':'span'));
@@ -827,10 +831,10 @@ function renderAvatars(avatars,peers) {
     item.textContent = (peer.name || 'Tamu').split(/\s+/).slice(0,2).map(word => [...word][0]).join('').toUpperCase();
     avatars.append(item);
   }
-  if (peers.length > 4) {
+  if (onlineCount > 4) {
     const count = document.createElement('span');
     count.className = 'avatar';
-    count.textContent = '+' + (peers.length - 4);
+    count.textContent = '+' + (onlineCount - 4);
     avatars.append(count);
   }
 }
@@ -848,14 +852,21 @@ async function sync() {
   try {
     const result = await exchange(null);
     if (state.epoch !== epoch || state.busy) return;
-    if (result.code === 200) accept(result.data);
+    if (result.code === 200) {
+      state.syncFailures=0;
+      accept(result.data);
+    }
     else {
+      state.syncFailures=Math.min(4,state.syncFailures+1);
       showStatus(result.data.error || 'Sinkronisasi gagal.');
       connection(false, 'Tidak tersedia');
       if (result.code === 404) state.room = '';
     }
   } catch {
-    if (state.epoch === epoch) connection(false, 'Terputus');
+    if (state.epoch === epoch) {
+      state.syncFailures=Math.min(4,state.syncFailures+1);
+      connection(false, 'Terputus');
+    }
   } finally {
     if (state.epoch === epoch) state.polling = false;
   }
@@ -923,6 +934,10 @@ function previewRemoval(edit) {
 }
 
 function edit(before, after, type = 'object', select = true) {
+  if (type === 'sheet' && before?.title !== after?.title && !state.canManageShare) {
+    showStatus('Hanya pemilik proyek yang dapat mengganti nama proyek.');
+    return Promise.resolve(false);
+  }
   if (type === 'object' && before?.container?.definition) {
     const linked = linkedMembers(before);
     const updates = after ? linked.map(item=>({
@@ -984,6 +999,11 @@ function refreshButtons() {
   const editable=canEditModel(), comment=canComment();
   $('#undo').disabled = state.busy || !editable || !state.undo.length;
   $('#redo').disabled = state.busy || !editable || !state.redo.length;
+  $('#import-skp-quick').disabled=state.busy || !editable;
+  $('#import-skp').disabled=state.busy || !editable;
+  $('#rename-project').disabled=state.busy || !editable || !state.canManageShare;
+  $('#rename-project').title=state.canManageShare?'Ganti nama proyek':'Hanya pemilik yang dapat mengganti nama proyek';
+  $('#sheet-form [name="title"]').disabled=!editable || !state.canManageShare;
   for (const id of ['copy-container','explode-container','remove-container','duplicate','delete']) {
     $('#'+id).disabled=state.busy || !editable;
   }
@@ -1067,6 +1087,7 @@ function refresh(force = false) {
     /** @param {HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement|HTMLButtonElement} element */ element => {
     element.disabled=!editable;
   });
+  sheetForm.elements.namedItem('title').disabled=!editable || !state.canManageShare;
   applyAccessUi();
   renderComments();
   renderSections();

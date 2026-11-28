@@ -47,12 +47,13 @@ window.qreaseeDemoPost = async (url, request) => {
     const document = payload.document;
     return { code: 200, data: {
       changes: document ? { document, ...demoMeshes(document) } : null,
-      peers: payload.peers || [], topology: { added: [], removed: [] },
+      peers: payload.peers || [], online_count: payload.online_count,
+      topology: { added: [], removed: [] },
       can_manage: Boolean(payload.can_manage), role: payload.role || 'edit'
     } };
   } catch (error) {
-    const commentError=['invalid_comment','invalid_target','comment_limit','invalid_share'].includes(error.message);
-    const accessError=['forbidden','read_only','comment_only'].includes(error.message);
+    const commentError=['invalid_comment','invalid_target','comment_limit','invalid_share','invalid_sheet'].includes(error.message);
+    const accessError=['forbidden','forbidden_project_name','read_only','comment_only'].includes(error.message);
     const limited=error.message === 'rate_limited' || error.message === 'room_limit';
     const code = error.message === 'room_missing' ? 404 : error.message === 'conflict' ? 409 :
       commentError ? 422 : accessError ? 403 : limited ? 429 :
@@ -71,10 +72,11 @@ window.qreaseeDemoPost = async (url, request) => {
     return { code, data: { error: code === 503 ? 'Ruang bersama belum siap: ' + error.message :
       code === 401 ? 'Sesi berakhir. Masuk kembali dengan Google.' :
       code === 429 ? 'Batas pembuatan proyek tercapai. Coba lagi nanti.' :
-      code === 403 ? (error.message === 'forbidden' ? 'Hanya pemilik proyek yang dapat mengubah akses.' :
+      code === 403 ? (error.message === 'forbidden_project_name' ? 'Hanya pemilik proyek yang dapat mengganti nama proyek.' :
+        error.message === 'forbidden' ? 'Hanya pemilik proyek yang dapat mengubah akses.' :
         error.message === 'comment_only' ? 'Akses ini hanya dapat menambah komentar.' :
         'Akses ini hanya dapat melihat proyek.') :
-      code === 422 ? 'Komentar atau akses tidak valid.' :
+      code === 422 ? 'Metadata lembar atau komentar tidak valid.' :
       code === 409 ? 'Objek atau lembar sudah diubah di sesi lain.' : 'Ruang tidak ditemukan.',
       changes, peers: [] } };
   }

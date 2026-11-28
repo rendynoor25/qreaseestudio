@@ -610,6 +610,10 @@ $('#sheet').addEventListener('dblclick',event=>{
     const field=fieldElement.getAttribute('data-sheet-field');
     const limits={title:80,room_title:80,notes:200,number:20,drawn_by:40,checked_by:40,issue_date:10};
     if(!(field in limits))return;
+    if(field==='title'&&!state.canManageShare){
+      showStatus('Hanya pemilik proyek yang dapat mengganti nama proyek.');
+      return;
+    }
     inlineLayoutEdit(fieldElement,state.doc.sheet[field]||'',limits[field],value=>{
       if((field==='title'||field==='number')&&!value)return;
       if(field==='issue_date'&&value&&!/^\d{4}-\d{2}-\d{2}$/.test(value)){
@@ -703,12 +707,21 @@ $('#layout-delete').onclick=()=>{
 };
 
 window.addEventListener('hashchange',()=>roomFromHash()?openRoom():showProjectHome());
-let lastSync=0;
+let lastSync=Date.now()+Math.random()*1200;
 setInterval(()=>{
+  if(document.hidden || !state.room)return;
   const fast=state.linePending || state.peers.some(peer=>peer.cursor?.line);
-  const interval=window.qreaseeCloudPost ? (fast?500:1500) : 350;
-  if (Date.now()-lastSync>=interval) { lastSync=Date.now(); sync(); }
+  const base=window.qreaseeCloudPost ? (fast?750:2000) : 350;
+  const interval=Math.min(30000,base*2**state.syncFailures);
+  if (Date.now()-lastSync>=interval) {
+    lastSync=Date.now()+Math.random()*Math.min(interval*.2,1000);
+    sync();
+  }
 },250);
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden){lastSync=Date.now();sync();}
+});
+window.addEventListener('online',()=>{lastSync=Date.now();sync();});
 if (roomFromHash()) openRoom();
 else if (window.qreaseeAuth) window.qreaseeAuth.ready.then(()=>renderProjectHome());
 else renderProjectHome();
