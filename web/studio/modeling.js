@@ -1087,6 +1087,7 @@ $('#sheet-form').onsubmit = event => {
   event.preventDefault();
   if (!sheetBaseline) return;
   const values = /** @type {Record<string, any>} */ (Object.fromEntries(new FormData(event.currentTarget)));
+  if (!state.canManageShare) values.title=sheetBaseline.title;
   values.scale = Number(values.scale);
   values.cut_height = Number(values.cut_height)/unitFactors[displayUnit];
   edit(sheetBaseline, {...sheetBaseline,...values}, 'sheet');
@@ -1127,6 +1128,26 @@ $('#copy-link').onclick = async () => {
   }
 };
 
+$('#rename-project').onclick = () => {
+  if (!state.doc || !state.canManageShare || !canEditModel()) return;
+  const dialog=$('#rename-project-dialog');
+  const input=$('#rename-project-name');
+  input.value=state.doc.sheet.title;
+  dialog.showModal();
+  input.focus();
+  input.select();
+};
+$('#rename-project-cancel').onclick = () => $('#rename-project-dialog').close();
+$('#rename-project-form').onsubmit = async event => {
+  event.preventDefault();
+  if (!state.doc || !state.canManageShare || !canEditModel()) return;
+  const title=$('#rename-project-name').value.trim();
+  if (!title || title.length>80) return;
+  const before=state.doc.sheet;
+  const saved=await edit(before,{...before,title},'sheet');
+  if (saved) $('#rename-project-dialog').close();
+};
+
 function download(extension, mime, body) {
   const link = document.createElement('a');
   const url = URL.createObjectURL(new Blob([body], {type:mime}));
@@ -1139,6 +1160,13 @@ function download(extension, mime, body) {
 $('#export-json').onclick = () => {
   if (state.doc) download('.qreasee.json','application/json',JSON.stringify(state.doc,null,2));
 };
+for (const [quick,action] of [['export-model-quick','export-dwg'],
+  ['export-layout-quick','export-layout-dwg'],['export-data-quick','export-json']]) {
+  $('#'+quick).onclick=()=>{
+    $('#export-quick-menu').open=false;
+    $('#'+action).click();
+  };
+}
 $('#export-obj').onclick = () => {
   if (!state.doc) return;
   let offset = 1;
@@ -1185,6 +1213,9 @@ $('#export-layout-dwg').onclick = async () => {
   }
 };
 $('#import-skp').onclick = () => $('#skp-file').click();
+$('#import-skp-quick').onclick = () => {
+  if (canEditModel() && !state.busy) $('#skp-file').click();
+};
 $('#skp-file').onchange = async event => {
   const input = /** @type {HTMLInputElement} */ (event.target);
   const file = input.files?.[0];

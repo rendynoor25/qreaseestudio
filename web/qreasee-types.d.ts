@@ -187,6 +187,7 @@ interface QreaseeFaceChanges {
 interface QreaseeResponse {
   changes?: QreaseeChangeSet | null;
   peers?: QreaseePeer[];
+  online_count?: number;
   error?: string | null;
   can_manage?: boolean;
   role?: 'edit' | 'comment' | 'view';
@@ -270,6 +271,7 @@ interface QreaseeState {
   hoverKey: string | null;
   epoch: number;
   polling: boolean;
+  syncFailures: number;
   peers: QreaseePeer[];
   cursor: QreaseeCursor | null;
   canManageShare: boolean;
