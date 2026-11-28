@@ -26,6 +26,11 @@ const CAD_EXPORT: &str = include_str!("../web/cad-export.js");
 const SKP_IMPORT: &str = include_str!("../web/skp-import.js");
 const LOGO: &[u8] = include_bytes!("../web/qreasee-logo.png");
 const LOGO_BLACK: &[u8] = include_bytes!("../web/qreasee-logo-black.png");
+const FAVICON_ICO: &[u8] = include_bytes!("../web/favicon.ico");
+const FAVICON_32: &[u8] = include_bytes!("../web/favicon-32.png");
+const FAVICON_192: &[u8] = include_bytes!("../web/favicon-192.png");
+const APPLE_TOUCH: &[u8] = include_bytes!("../web/apple-touch-icon.png");
+const OG_IMAGE: &[u8] = include_bytes!("../web/og-image.png");
 
 struct Room {
     document: Document,
@@ -249,6 +254,36 @@ fn serve(mut stream: TcpStream, studio: &Studio) -> io::Result<()> {
             "200 OK",
             "image/png",
             LOGO_BLACK,
+        ),
+        ("GET", "/favicon.ico") => respond(
+            &mut stream,
+            "200 OK",
+            "image/x-icon",
+            FAVICON_ICO,
+        ),
+        ("GET", "/favicon-32.png") => respond(
+            &mut stream,
+            "200 OK",
+            "image/png",
+            FAVICON_32,
+        ),
+        ("GET", "/favicon-192.png") => respond(
+            &mut stream,
+            "200 OK",
+            "image/png",
+            FAVICON_192,
+        ),
+        ("GET", "/apple-touch-icon.png") => respond(
+            &mut stream,
+            "200 OK",
+            "image/png",
+            APPLE_TOUCH,
+        ),
+        ("GET", "/og-image.png") => respond(
+            &mut stream,
+            "200 OK",
+            "image/png",
+            OG_IMAGE,
         ),
         ("POST", _) if !json_input => reject(
             &mut stream,

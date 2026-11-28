@@ -1,4 +1,5 @@
 import { intersection as intersectPolygons, difference as differencePolygons } from 'polygon-clipping';
+import earcut from 'earcut';
 
 export type Point = [number, number, number];
 export type XY = [number, number];
@@ -319,6 +320,26 @@ export function triangulate(points: readonly XY[]): [number, number, number][] {
     if (ear < 0) return [];
     remaining.splice(ear, 1);
   }
+  return triangles;
+}
+
+/** Triangulate a ring with optional inner holes; all points are in one plane. */
+export function triangulateWithHoles(
+  outer: readonly XY[],
+  holes: readonly (readonly XY[])[] = []
+): [number, number, number][] {
+  const data: number[] = [];
+  const holeIndices: number[] = [];
+  for (const point of outer) data.push(point[0], point[1]);
+  for (const hole of holes) {
+    if (hole.length < 3) continue;
+    holeIndices.push(data.length / 2);
+    for (const point of hole) data.push(point[0], point[1]);
+  }
+  const indices = earcut(data, holeIndices, 2);
+  const triangles: [number, number, number][] = [];
+  for (let i = 0; i + 2 < indices.length; i += 3)
+    triangles.push([indices[i], indices[i + 1], indices[i + 2]]);
   return triangles;
 }
 

@@ -33,7 +33,7 @@ if (auth && !html.includes('id="auth-gate"')) {
   throw new Error('Authenticated demo must include the sign-in gate.');
 }
 fs.writeFileSync(path.join(output, 'index.html'), html);
-for (const name of ['studio.css', 'studio.js', 'line-geometry.js', 'cad-export.js', 'skp-import.js', 'qreasee-logo.png', 'qreasee-logo-black.png']) {
+for (const name of ['studio.css', 'studio.js', 'line-geometry.js', 'cad-export.js', 'skp-import.js', 'qreasee-logo.png', 'qreasee-logo-black.png', 'favicon.ico', 'favicon-32.png', 'favicon-192.png', 'apple-touch-icon.png', 'og-image.png']) {
   fs.copyFileSync(path.join(root, 'web', name), path.join(output, name));
 }
 fs.copyFileSync(path.join(root, 'demo', 'demo.js'), path.join(output, 'demo.js'));
