@@ -3167,6 +3167,13 @@ function insertRectangle(object,host) {
     others=shell.pieces.filter(part=>part.id!==surface.id);
   }
   if (surface.height!==0) return addObject(object,false);
+  if (surface.solid_id && ['top','bottom'].includes(surface.surface_role) &&
+      (surface.shape==='circle'||surface.shape==='polygon')) {
+    const inner={...object,container:surface.container??null,solid_id:surface.solid_id,
+      surface_role:surface.surface_role,opening_id:identity(),
+      opening_origin:[object.x,object.y,object.z]};
+    return batch([],[inner],[]);
+  }
   const strips=QreaseeLine.splitRectangle(surface,object);
   if (!strips) return addObject(object,false);
   const pieces=strips.map((geometry,index)=>({...surface,...geometry,
@@ -3408,8 +3415,88 @@ function openingThroughOffset(face) {
   return normal.reduce((sum,value,i)=>sum+value*(surfaceCenter(bottom)[i]-origin[i]),0);
 }
 
+/** Build a circular or polygon cap mesh with an inner hole. */
+function capMeshWithHole(cap,holeLoop,solidId) {
+  const outer=previewMesh({...cap,height:0}).vertices;
+  if (outer.length<3||holeLoop.length<3) return null;
+  const z=outer[0][2];
+  if (!Number.isFinite(z)||outer.some(point=>Math.abs(point[2]-z)>1e-5)||
+      holeLoop.some(point=>Math.abs(point[2]-z)>1e-5)) return null;
+  const center=[cap.x,cap.y,cap.z];
+  const outerRing=/** @type {[number,number][]} */ (outer.map(point=>
+    [point[0]-center[0],point[1]-center[1]]));
+  const holeRing=/** @type {[number,number][]} */ (holeLoop.map(point=>
+    [point[0]-center[0],point[1]-center[1]]));
+  const faces=QreaseeLine.triangulateWithHoles(outerRing,[holeRing]);
+  if (!faces.length) return null;
+  const vertices=[...outer,...holeLoop].map(point=>[
+    point[0]-center[0],point[1]-center[1],point[2]-center[2]]);
+  return {...cap,id:identity(),shape:'mesh',x:center[0],y:center[1],z:center[2],
+    width:cap.width,depth:cap.depth,height:0,rotation:0,
+    geometry:{vertices,faces},hide_edges:true,
+    solid_id:solidId,surface_role:cap.surface_role,opening_id:null,opening_origin:null,
+    plane_u:null,plane_v:null,profile:null,wall_axis:null};
+}
+
+function capRimLines(cap,loop,solidId) {
+  const lines=[];
+  for (let index=0;index<loop.length;index++) {
+    const line=lineObject(loop[index],loop[(index+1)%loop.length],'Tepi');
+    if (line) lines.push({...line,color:cap.color,container:cap.container??null,
+      solid_id:solidId,surface_role:'edge'});
+  }
+  return lines;
+}
+
+function capOpeningPair(face) {
+  if (!face?.solid_id||!face.opening_id||!['top','bottom'].includes(face.surface_role))
+    return null;
+  const host=objects().find(item=>item.id!==face.id&&item.solid_id===face.solid_id&&
+    item.surface_role===face.surface_role&&item.height===0&&
+    (item.shape==='circle'||item.shape==='polygon'));
+  if (!host) return null;
+  const otherRole=face.surface_role==='top'?'bottom':'top';
+  const opposite=objects().find(item=>item.solid_id===face.solid_id&&
+    item.surface_role===otherRole&&item.height===0&&
+    (item.shape==='circle'||item.shape==='polygon'));
+  return opposite?{host,opposite}:null;
+}
+
+function cutCapThroughOpening(face,host,opposite) {
+  const hostLoop=previewMesh({...face,height:0}).vertices;
+  const oppositeLoop=previewMesh(openingProjection(face,opposite)).vertices;
+  const hostMesh=capMeshWithHole(host,hostLoop,face.solid_id);
+  const oppositeMesh=capMeshWithHole(opposite,oppositeLoop,face.solid_id);
+  if (!hostMesh||!oppositeMesh) return false;
+  const walls=connectionFaces(face,surfaceCenter(opposite),face.solid_id,face.opening_id,
+    face.opening_origin??surfaceCenter(face));
+  const hostOuter=previewMesh({...host,height:0}).vertices;
+  const oppositeOuter=previewMesh({...opposite,height:0}).vertices;
+  const oldOpening=objects().filter(item=>item.opening_id===face.opening_id&&item.id!==face.id);
+  return batch([host,opposite,face,...oldOpening],
+    [hostMesh,oppositeMesh,...walls,
+      ...capRimLines(host,hostLoop,face.solid_id),
+      ...capRimLines(opposite,oppositeLoop,face.solid_id),
+      ...capRimLines(host,hostOuter,face.solid_id),
+      ...capRimLines(opposite,oppositeOuter,face.solid_id)],[]);
+}
+
 /** Push an opening straight through its block, creating a clean hole. */
 function pushThroughOpening(face) {
+  const pair=capOpeningPair(face);
+  if (pair) {
+    state.drawPending=null;
+    state.drag=null;
+    state.linePress=null;
+    state.inference=null;
+    state.selected.delete(face.id);
+    const result=cutCapThroughOpening(face,pair.host,pair.opposite);
+    if (!result) {showStatus('Bukaan belum dapat dipotong pada tutup solid ini.');return false;}
+    if (typeof result.then==='function')
+      result.then(saved=>{if (saved) showStatus('Bukaan menembus balok dibuat.');});
+    else showStatus('Bukaan menembus balok dibuat.');
+    return true;
+  }
   const opposite=openingThroughOffset(face);
   if (opposite===null||opposite>=-.001) return false;
   const origin=face.opening_origin??surfaceCenter(face);
