@@ -122,6 +122,12 @@ const hoverPattern = createSurfacePattern(9, surface => {
 /** @type {QreaseeCamera} */
 const camera = { yaw: .62, pitch: .48, axes:null, scale: 40, base: 40, baseDistance:22,
   x: 0, y: 0, center:[0,0,0], distance:22, perspective:true };
+/** @type {import('./editor-context').EditorContext} */
+const editorContext = {state,camera,layout:{
+  tool:'select',selected:null,drag:null,dimensionStart:null,activeViewId:null,
+  gridPending:null,gridHover:null,selectedGridId:null,hoverGridId:null,zoom:1
+}};
+const layoutRuntime = editorContext.layout;
 const perspectiveFov = 35*Math.PI/180;
 const nearPlane = .01;
 const unitFactors = {m:1,cm:100,mm:1000};
@@ -688,7 +694,7 @@ function rememberProject() {
 
 async function openRoom(createBlank) {
   const epoch = ++state.epoch;
-  selectedGridId=null;
+  layoutRuntime.selectedGridId=null;
   if (window.qreaseeAuth) {
     const session = await window.qreaseeAuth.ready;
     if (state.epoch !== epoch || !session) return;
@@ -697,7 +703,7 @@ async function openRoom(createBlank) {
   }
   state.busy = false;
   exitLayoutView();
-  layoutSelected = null;
+  layoutRuntime.selected = null;
   $('#layout-selection').hidden = true;
   state.room = '';
   state.doc = null;
@@ -1000,7 +1006,7 @@ function refresh(force = false) {
     $('#revision').textContent = 'Revisi ' + doc.revision;
   }
   if (state.inside && !members(state.inside).length) state.inside=null;
-  if(selectedGridId&&!grids().some(grid=>grid.id===selectedGridId))selectedGridId=null;
+  if(layoutRuntime.selectedGridId&&!grids().some(grid=>grid.id===layoutRuntime.selectedGridId))layoutRuntime.selectedGridId=null;
   const valid=new Set(objects().map(targetId));
   state.selected=new Set([...state.selected].filter(id=>valid.has(id)));
   refreshButtons();

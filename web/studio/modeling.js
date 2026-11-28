@@ -67,7 +67,7 @@ function renderModelGridList() {
   list.replaceChildren();
   for(const grid of items){
     const row=document.createElement('div');
-    row.className='model-grid-row'+(selectedGridId===grid.id?' selected':'')+(grid.hidden?' hidden-grid':'');
+    row.className='model-grid-row'+(layoutRuntime.selectedGridId===grid.id?' selected':'')+(grid.hidden?' hidden-grid':'');
     const selectButton=document.createElement('button');
     selectButton.type='button';selectButton.className='grid-select';
     selectButton.textContent='▦  '+grid.name;
@@ -84,7 +84,7 @@ function renderModelGridList() {
   }
 }
 function selectModelGrid(id) {
-  selectedGridId=id;
+  layoutRuntime.selectedGridId=id;
   state.selected.clear();
   renderTree();redraw();
   const grid=grids().find(item=>item.id===id);
@@ -107,14 +107,14 @@ function renameGrid(id,name) {
 function removeGrid(id) {
   if(!canEditModel())return;
   const layout=sheetLayout();
-  if(selectedGridId===id)selectedGridId=null;
-  if(layoutSelected?.kind==='grid'&&layoutSelected.id===id){layoutSelected=null;$('#layout-selection').hidden=true;}
+  if(layoutRuntime.selectedGridId===id)layoutRuntime.selectedGridId=null;
+  if(layoutRuntime.selected?.kind==='grid'&&layoutRuntime.selected.id===id){layoutRuntime.selected=null;$('#layout-selection').hidden=true;}
   saveSheetLayout({...layout,gridLines:grids().filter(grid=>grid.id!==id),
     dimensions:layout.dimensions.filter(item=>item.gridA!==id&&item.gridB!==id)});
 }
 
 function select(id, additive=false) {
-  if(!additive)selectedGridId=null;
+  if(!additive)layoutRuntime.selectedGridId=null;
   activeSectionId=null;
   if (state.movePending) {state.movePending=null;state.inference=null;}
   if (state.rotatePending) {state.rotatePending=null;state.inference=null;}

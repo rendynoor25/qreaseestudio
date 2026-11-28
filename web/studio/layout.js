@@ -8,10 +8,6 @@ const layoutDefaults=()=>({
   ],texts:[],dimensions:[],gridLines:[]
 });
 const sheetLayout=()=>state.doc?.sheet.layout || layoutDefaults();
-let layoutTool='select',layoutSelected=null,layoutDrag=null,layoutDimensionStart=null;
-let layoutActiveViewId=null,layoutGridPending=null,layoutGridHover=null;
-let selectedGridId=null,hoverGridId=null;
-let layoutZoom=1;
 const grids=()=>sheetLayout().gridLines||[];
 let gridProjectionCache={meshes:null,plans:null,scale:null,entries:new Map()};
 function nextGridName() {
@@ -95,8 +91,8 @@ function gridBaseSegment(grid,view) {
 function gridSegment(grid,view) {
   const segment=gridBaseSegment(grid,view);
   if(!segment)return null;
-  if(layoutDrag?.kind==='grid'&&layoutDrag.id===grid.id&&layoutDrag.viewId===view.id)
-    return segment.map(([x,y])=>[x+layoutDrag.dx,y+layoutDrag.dy]);
+  if(layoutRuntime.drag?.kind==='grid'&&layoutRuntime.drag.id===grid.id&&layoutRuntime.drag.viewId===view.id)
+    return segment.map(([x,y])=>[x+layoutRuntime.drag.dx,y+layoutRuntime.drag.dy]);
   return segment;
 }
 function modelGridHeight() {
@@ -130,7 +126,7 @@ function drawModelGrids() {
     if(grid.hidden)continue;
     const world=gridWorldEndpoints(grid),low=modelGridScreenLine(grid,bottom);
     if(!world||!low)continue;
-    const selected=grid.id===selectedGridId,hovered=grid.id===hoverGridId;
+    const selected=grid.id===layoutRuntime.selectedGridId,hovered=grid.id===layoutRuntime.hoverGridId;
     const high=world.map(([x,y])=>stagePoint([x,y,top]));
     if(selected&&high.every(point=>point.slice(0,2).every(Number.isFinite))){
       ctx.beginPath();ctx.moveTo(low[0][0],low[0][1]);ctx.lineTo(low[1][0],low[1][1]);
@@ -189,8 +185,8 @@ function layoutViewAt(point) {
     point[1]>=view.y && point[1]<=view.y+view.h);
 }
 function selectLayoutItem(kind,id) {
-  layoutSelected={kind,id};
-  selectedGridId=kind==='grid'?id:null;
+  layoutRuntime.selected={kind,id};
+  layoutRuntime.selectedGridId=kind==='grid'?id:null;
   const panel=$('#layout-selection');
   panel.hidden=false;
   const view=kind==='view'?sheetLayout().views.find(item=>item.id===id):null;
@@ -208,9 +204,9 @@ function selectLayoutItem(kind,id) {
   drawSheet();
 }
 function setLayoutTool(tool) {
-  if(tool!=='select'&&!layoutActiveViewId)return;
-  layoutTool=tool;layoutDimensionStart=null;
-  layoutGridPending=null;layoutGridHover=null;
+  if(tool!=='select'&&!layoutRuntime.activeViewId)return;
+  layoutRuntime.tool=tool;layoutRuntime.dimensionStart=null;
+  layoutRuntime.gridPending=null;layoutRuntime.gridHover=null;
   $('#layout-stage').dataset.tool=tool;
   document.querySelectorAll('.layout-tool').forEach(/** @param {HTMLElement} button */ button=>button.classList.toggle('active',button.dataset.layoutTool===tool));
   drawSheet();
@@ -218,7 +214,7 @@ function setLayoutTool(tool) {
 function enterLayoutView(id) {
   const view=sheetLayout().views.find(item=>item.id===id);
   if(!view)return;
-  layoutActiveViewId=id;
+  layoutRuntime.activeViewId=id;
   $('#layout-stage').classList.add('editing-view');
   $('#layout-mode-label').textContent='Mengedit view: '+view.title;
   $('#layout-finish').hidden=false;
@@ -228,8 +224,8 @@ function enterLayoutView(id) {
   selectLayoutItem('view',id);
 }
 function exitLayoutView() {
-  layoutActiveViewId=null;
-  layoutGridPending=null;layoutGridHover=null;layoutDimensionStart=null;
+  layoutRuntime.activeViewId=null;
+  layoutRuntime.gridPending=null;layoutRuntime.gridHover=null;layoutRuntime.dimensionStart=null;
   $('#layout-stage').classList.remove('editing-view');
   $('#layout-mode-label').textContent='Double click view untuk mengedit isinya';
   $('#layout-finish').hidden=true;
@@ -246,13 +242,13 @@ function drawSheet() {
   add('rect',{x:9,y:9,width:402,height:279,fill:'none',stroke:'#33404c','stroke-width':.42});
   const text=(x,y,value,options={})=>add('text',{x,y,fill:'#23313b','font-family':'Segoe UI, Arial, sans-serif','font-size':3.2,...options},value);
   const layout=sheetLayout();
-  const viewports=layout.views.map(view=>layoutDrag?.kind==='view'&&layoutDrag.id===view.id
-    ?{...view,x:layoutDrag.x,y:layoutDrag.y}:view);
+  const viewports=layout.views.map(view=>layoutRuntime.drag?.kind==='view'&&layoutRuntime.drag.id===view.id
+    ?{...view,x:layoutRuntime.drag.x,y:layoutRuntime.drag.y}:view);
   let clipped=false;
   for (const view of viewports) {
     const {id,x,y,w,h,mode}=view,dimensions=mode==='plan';
     const viewScale=view.scale||settings.scale;
-    const frame=svg('g',{'data-view-id':id,class:[layoutSelected?.kind==='view'&&layoutSelected.id===id?'layout-selected':'',layoutActiveViewId===id?'layout-active':''].filter(Boolean).join(' ')});
+    const frame=svg('g',{'data-view-id':id,class:[layoutRuntime.selected?.kind==='view'&&layoutRuntime.selected.id===id?'layout-selected':'',layoutRuntime.activeViewId===id?'layout-active':''].filter(Boolean).join(' ')});
     sheet.append(frame);
     const addView=(name,attrs,value)=>frame.append(svg(name,attrs,value));
     const viewText=(tx,ty,value,options={})=>addView('text',{x:tx,y:ty,fill:'#23313b','font-family':'Segoe UI, Arial, sans-serif','font-size':3.2,...options},value);
@@ -316,7 +312,7 @@ function drawSheet() {
       if(!segment)continue;
       const [ax,ay]=segment[0],[bx,by]=segment[1];
       const head=[x+ax,y+ay],tail=[x+bx,y+by];
-      const mark=svg('g',{'data-grid-id':grid.id,class:'layout-grid'+(selectedGridId===grid.id?' layout-selected':'')});
+      const mark=svg('g',{'data-grid-id':grid.id,class:'layout-grid'+(layoutRuntime.selectedGridId===grid.id?' layout-selected':'')});
       mark.append(svg('line',{x1:head[0],y1:head[1],x2:tail[0],y2:tail[1],stroke:'#437a9e','stroke-width':.34,'stroke-dasharray':'3 1.4'}));
       mark.append(svg('line',{x1:head[0],y1:head[1],x2:tail[0],y2:tail[1],stroke:'transparent','stroke-width':5}));
       mark.append(svg('circle',{cx:head[0],cy:head[1],r:3.1,fill:'#fff',stroke:'#366b91','stroke-width':.45}));
@@ -324,8 +320,8 @@ function drawSheet() {
       mark.append(svg('circle',{cx:tail[0],cy:tail[1],r:.65,fill:'#366b91'}));
       frame.append(mark);
     }
-    if(layoutGridPending?.viewId===id) {
-      const [ax,ay]=layoutGridPending.a,[bx,by]=layoutGridHover||layoutGridPending.a;
+    if(layoutRuntime.gridPending?.viewId===id) {
+      const [ax,ay]=layoutRuntime.gridPending.a,[bx,by]=layoutRuntime.gridHover||layoutRuntime.gridPending.a;
       addView('line',{x1:x+ax,y1:y+ay,x2:x+bx,y2:y+by,stroke:'#e78c38','stroke-width':.45,'stroke-dasharray':'2 1'});
       addView('circle',{cx:x+ax,cy:y+ay,r:3,fill:'#fff',stroke:'#e78c38','stroke-width':.5});
     }
@@ -347,7 +343,7 @@ function drawSheet() {
       const a=[x+ax,y+ay],b=[x+bx,y+by];
       const p1=horizontal?[a[0],a[1]+offset]:[a[0]+offset,a[1]];
       const p2=horizontal?[b[0],a[1]+offset]:[a[0]+offset,b[1]];
-      const dimensionGroup=svg('g',{'data-dimension-id':dimension.id,class:layoutSelected?.kind==='dimension'&&layoutSelected.id===dimension.id?'layout-selected':''});
+      const dimensionGroup=svg('g',{'data-dimension-id':dimension.id,class:layoutRuntime.selected?.kind==='dimension'&&layoutRuntime.selected.id===dimension.id?'layout-selected':''});
       for(const [s,e] of [[a,p1],[b,p2],[p1,p2]]) dimensionGroup.append(svg('line',{x1:s[0],y1:s[1],x2:e[0],y2:e[1],stroke:'#284c5e','stroke-width':.3}));
       dimensionGroup.append(svg('line',{x1:p1[0],y1:p1[1],x2:p2[0],y2:p2[1],stroke:'transparent','stroke-width':5}));
       for(const p of [p1,p2]) addView('circle',{cx:p[0],cy:p[1],r:.7,fill:'#284c5e'});
@@ -388,10 +384,10 @@ function drawSheet() {
   text(372,272,settings.number,{'font-size':4.6,'font-weight':700,'textLength':Math.min(33,Math.max(4,settings.number.length*2.8)),'lengthAdjust':'spacingAndGlyphs','data-sheet-field':'number'});
   if(settings.issue_date) text(372,283,settings.issue_date,{'font-size':2.7,fill:'#52616d','data-sheet-field':'issue_date'});
   for(const item of layout.texts) {
-    const draft=layoutDrag?.kind==='text'&&layoutDrag.id===item.id?layoutDrag:null;
+    const draft=layoutRuntime.drag?.kind==='text'&&layoutRuntime.drag.id===item.id?layoutRuntime.drag:null;
     const x=draft?.x??item.x,y=draft?.y??item.y;
-    const group=svg('g',{'data-text-id':item.id,class:[layoutSelected?.kind==='text'&&layoutSelected.id===item.id?'layout-selected':'',item.viewId===layoutActiveViewId?'layout-active':''].filter(Boolean).join(' ')});
-    group.append(svg('rect',{x:x-1,y:y-item.size,width:Math.max(12,item.text.length*item.size*.55),height:item.size+2,fill:'transparent',stroke:layoutSelected?.id===item.id?'#ec8d35':'none','stroke-width':.5}));
+    const group=svg('g',{'data-text-id':item.id,class:[layoutRuntime.selected?.kind==='text'&&layoutRuntime.selected.id===item.id?'layout-selected':'',item.viewId===layoutRuntime.activeViewId?'layout-active':''].filter(Boolean).join(' ')});
+    group.append(svg('rect',{x:x-1,y:y-item.size,width:Math.max(12,item.text.length*item.size*.55),height:item.size+2,fill:'transparent',stroke:layoutRuntime.selected?.id===item.id?'#ec8d35':'none','stroke-width':.5}));
     group.append(svg('text',{x,y,fill:'#23313b','font-family':'Segoe UI, Arial, sans-serif','font-size':item.size},item.text));
     sheet.append(group);
   }
@@ -399,7 +395,7 @@ function drawSheet() {
     ? 'Ada tampilan yang terpotong. Gunakan penyebut skala yang lebih besar.'
     : 'Untuk menjaga skala, cetak A3 pada ukuran aktual (100%).';
   drawLayoutCursors();
-  if (!layoutDrag && !layoutGridPending) {
+  if (!layoutRuntime.drag && !layoutRuntime.gridPending) {
     const thumbnail=sheet.cloneNode(true);
     thumbnail.id='sheet-mini';
     thumbnail.querySelector('.remote-cursors')?.remove();
@@ -426,23 +422,23 @@ $('#sheet').addEventListener('pointermove',event=>{
   const point=sheetPoint(event);
   if (!point) return;
   state.cursor={mode:'layout',x:round(point[0]),y:round(point[1])};
-  if(layoutGridPending) {
-    const view=sheetLayout().views.find(item=>item.id===layoutGridPending.viewId);
-    if(view)layoutGridHover=layoutSnap(view,point);
+  if(layoutRuntime.gridPending) {
+    const view=sheetLayout().views.find(item=>item.id===layoutRuntime.gridPending.viewId);
+    if(view)layoutRuntime.gridHover=layoutSnap(view,point);
     drawSheet();
     return;
   }
-  if (layoutDrag) {
-    if(layoutDrag.kind==='grid'){
-      layoutDrag.dx=point[0]-layoutDrag.start[0];
-      layoutDrag.dy=point[1]-layoutDrag.start[1];
+  if (layoutRuntime.drag) {
+    if(layoutRuntime.drag.kind==='grid'){
+      layoutRuntime.drag.dx=point[0]-layoutRuntime.drag.start[0];
+      layoutRuntime.drag.dy=point[1]-layoutRuntime.drag.start[1];
       drawSheet();return;
     }
-    const source=layoutDrag.kind==='view'?sheetLayout().views.find(item=>item.id===layoutDrag.id)
-      :sheetLayout().texts.find(item=>item.id===layoutDrag.id);
+    const source=layoutRuntime.drag.kind==='view'?sheetLayout().views.find(item=>item.id===layoutRuntime.drag.id)
+      :sheetLayout().texts.find(item=>item.id===layoutRuntime.drag.id);
     if (!source) return;
-    layoutDrag.x=source.x+point[0]-layoutDrag.start[0];
-    layoutDrag.y=source.y+point[1]-layoutDrag.start[1];
+    layoutRuntime.drag.x=source.x+point[0]-layoutRuntime.drag.start[0];
+    layoutRuntime.drag.y=source.y+point[1]-layoutRuntime.drag.start[1];
     drawSheet();
   }
 });
@@ -479,10 +475,10 @@ $('#sheet').addEventListener('pointerdown',event=>{
   const point=sheetPoint(event);
   if (!point) return;
   const view=layoutViewAt(point);
-  if(layoutTool!=='select' && (!layoutActiveViewId || view?.id!==layoutActiveViewId)) {
+  if(layoutRuntime.tool!=='select' && (!layoutRuntime.activeViewId || view?.id!==layoutRuntime.activeViewId)) {
     showStatus('Double click view yang ingin diedit terlebih dahulu.');return;
   }
-  if(layoutTool==='text') {
+  if(layoutRuntime.tool==='text') {
     const value=prompt('Teks dalam view:');
     if(value?.trim()) {
       const layout=sheetLayout();
@@ -494,38 +490,38 @@ $('#sheet').addEventListener('pointerdown',event=>{
     }
     setLayoutTool('select');return;
   }
-  if(layoutTool==='grid') {
+  if(layoutRuntime.tool==='grid') {
     if (!view || view.mode==='iso') {showStatus('Grid tersedia pada denah dan tampak ortografis.');return;}
     const local=layoutSnap(view,point);
-    if(!layoutGridPending || layoutGridPending.viewId!==view.id) {
-      layoutGridPending={viewId:view.id,a:local};
-      layoutGridHover=local;
+    if(!layoutRuntime.gridPending || layoutRuntime.gridPending.viewId!==view.id) {
+      layoutRuntime.gridPending={viewId:view.id,a:local};
+      layoutRuntime.gridHover=local;
       showStatus('Kepala grid ditetapkan. Klik titik ekornya.');
       drawSheet();return;
     }
-    const start=layoutGridPending;
+    const start=layoutRuntime.gridPending;
     if(Math.hypot(local[0]-start.a[0],local[1]-start.a[1])<2)return;
     const layout=sheetLayout(),name=nextGridName();
     const world=gridWorldFromLocal(view,start.a,local);
     if(!world){showStatus('Grid tidak dapat dibuat pada view ini.');return;}
     const line={id:identity(),viewId:view.id,a:start.a,b:local,name,worldA:world[0],worldB:world[1],hidden:false};
-    layoutGridPending=null;layoutGridHover=null;
+    layoutRuntime.gridPending=null;layoutRuntime.gridHover=null;
     saveSheetLayout({...layout,gridLines:[...(layout.gridLines||[]),line]}).then(saved=>{
       if(saved)selectLayoutItem('grid',line.id);
     });
     showStatus('Grid '+line.name+' dibuat. Klik kepala grid berikutnya.');
     return;
   }
-  if(layoutTool==='dimension') {
+  if(layoutRuntime.tool==='dimension') {
     if (!view || view.mode==='iso') {showStatus('Dimensi tersedia pada denah dan tampak ortografis.');return;}
     const gridId=event.target.closest('[data-grid-id]')?.getAttribute('data-grid-id');
     const layout=sheetLayout(),grid=(layout.gridLines||[]).find(item=>item.id===gridId&&gridSegment(item,view));
     if(!grid) {showStatus('Klik batang grid pertama, lalu batang grid sebelahnya.');return;}
-    if(!layoutDimensionStart || layoutDimensionStart.viewId!==view.id) {
-      layoutDimensionStart={viewId:view.id,gridId:grid.id};
+    if(!layoutRuntime.dimensionStart || layoutRuntime.dimensionStart.viewId!==view.id) {
+      layoutRuntime.dimensionStart={viewId:view.id,gridId:grid.id};
       showStatus('Grid '+grid.name+' dipilih. Klik batang grid kedua.');
     } else {
-      const first=(layout.gridLines||[]).find(item=>item.id===layoutDimensionStart.gridId);
+      const first=(layout.gridLines||[]).find(item=>item.id===layoutRuntime.dimensionStart.gridId);
       if(!first || first.id===grid.id)return;
       const firstSegment=gridSegment(first,view),secondSegment=gridSegment(grid,view);
       if(!firstSegment||!secondSegment)return;
@@ -535,7 +531,7 @@ $('#sheet').addEventListener('pointerdown',event=>{
       if(parallel<.98){showStatus('Dimensi antar-grid memerlukan dua garis sejajar.');return;}
       const dimension={id:identity(),viewId:view.id,a:firstSegment[0],b:secondSegment[0],gridA:first.id,gridB:grid.id};
       saveSheetLayout({...layout,dimensions:[...layout.dimensions,dimension]});
-      layoutDimensionStart=null;
+      layoutRuntime.dimensionStart=null;
       showStatus('Dimensi antar-grid dibuat. Pilih pasangan berikutnya.');
     }
     return;
@@ -546,30 +542,30 @@ $('#sheet').addEventListener('pointerdown',event=>{
   if(kind) {
     const attribute={grid:'data-grid-id',dimension:'data-dimension-id',text:'data-text-id',view:'data-view-id'}[kind];
     const id=target.getAttribute(attribute);
-    if(layoutActiveViewId && kind==='view' && id!==layoutActiveViewId) {
+    if(layoutRuntime.activeViewId && kind==='view' && id!==layoutRuntime.activeViewId) {
       showStatus('Double click view lain untuk beralih.');return;
     }
-    if(layoutActiveViewId && kind==='grid' && (!view || view.id!==layoutActiveViewId ||
+    if(layoutRuntime.activeViewId && kind==='grid' && (!view || view.id!==layoutRuntime.activeViewId ||
       !grids().some(item=>item.id===id&&gridSegment(item,view))))return;
     selectLayoutItem(kind,id);
-    if(layoutActiveViewId && kind==='grid'){
-      layoutDrag={kind:'grid',id,viewId:view.id,start:point,dx:0,dy:0};
+    if(layoutRuntime.activeViewId && kind==='grid'){
+      layoutRuntime.drag={kind:'grid',id,viewId:view.id,start:point,dx:0,dy:0};
       event.currentTarget.setPointerCapture(event.pointerId);return;
     }
-    if(layoutActiveViewId && kind!=='text')return;
+    if(layoutRuntime.activeViewId && kind!=='text')return;
     const source=kind==='view'?sheetLayout().views.find(item=>item.id===id)
       :sheetLayout().texts.find(item=>item.id===id);
     if(!source)return;
-    layoutDrag={kind,id,start:point,x:source.x,y:source.y};
+    layoutRuntime.drag={kind,id,start:point,x:source.x,y:source.y};
     event.currentTarget.setPointerCapture(event.pointerId);
   } else if(point[1]>=254) {
     $('.layout-title-details').open=true;
     $('.layout-title-details').scrollIntoView({block:'nearest'});
-  } else {layoutSelected=null;$('#layout-selection').hidden=true;drawSheet();}
+  } else {layoutRuntime.selected=null;$('#layout-selection').hidden=true;drawSheet();}
 });
 $('#sheet').addEventListener('pointerup',event=>{
-  if (!layoutDrag) return;
-  const drag=layoutDrag;layoutDrag=null;
+  if (!layoutRuntime.drag) return;
+  const drag=layoutRuntime.drag;layoutRuntime.drag=null;
   if(drag.kind==='grid'){
     const grid=grids().find(item=>item.id===drag.id);
     const view=sheetLayout().views.find(item=>item.id===drag.viewId);
@@ -595,7 +591,7 @@ $('#sheet').addEventListener('pointerup',event=>{
   const key=drag.kind==='view'?'views':'texts';
   saveSheetLayout({...layout,[key]:layout[key].map(item=>item.id===drag.id?{...item,x,y}:item)});
 });
-$('#sheet').addEventListener('pointercancel',()=>{layoutDrag=null;drawSheet();});
+$('#sheet').addEventListener('pointercancel',()=>{layoutRuntime.drag=null;drawSheet();});
 $('#sheet').addEventListener('dblclick',event=>{
   const caption=event.target.closest('[data-view-caption]');
   if(caption){
@@ -628,21 +624,21 @@ $('#sheet').addEventListener('dblclick',event=>{
 });
 $('#layout-finish').onclick=exitLayoutView;
 document.addEventListener('keydown',event=>{
-  if(event.key==='Escape' && state.layout && layoutActiveViewId &&
+  if(event.key==='Escape' && state.layout && layoutRuntime.activeViewId &&
     !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)) {
     event.preventDefault();event.stopPropagation();
-    if(layoutGridPending || layoutDimensionStart)setLayoutTool('select');
+    if(layoutRuntime.gridPending || layoutRuntime.dimensionStart)setLayoutTool('select');
     else exitLayoutView();
   }
 },true);
 document.querySelectorAll('.layout-tool').forEach(/** @param {HTMLElement} button */ button=>button.onclick=()=>setLayoutTool(button.dataset.layoutTool));
 $('#layout-zoom').onchange=event=>{
-  layoutZoom=Number(event.target.value);
-  $('#layout-stage').style.setProperty('--layout-sheet-width',(840*layoutZoom)+'px');
+  layoutRuntime.zoom=Number(event.target.value);
+  $('#layout-stage').style.setProperty('--layout-sheet-width',(840*layoutRuntime.zoom)+'px');
 };
 function stepLayoutZoom(direction) {
   const levels=[.5,.75,1,1.25,1.5,2,3];
-  const index=levels.indexOf(layoutZoom);
+  const index=levels.indexOf(layoutRuntime.zoom);
   $('#layout-zoom').value=String(levels[clamp(index+direction,0,levels.length-1)]);
   $('#layout-zoom').dispatchEvent(new Event('change'));
 }
@@ -660,47 +656,47 @@ document.querySelectorAll('[data-view-mode]').forEach(/** @param {HTMLElement} b
 $('#sheet').ondragover=event=>{if(event.dataTransfer.types.includes('text/qreasee-view')) event.preventDefault();};
 $('#sheet').ondrop=event=>{event.preventDefault();const mode=event.dataTransfer.getData('text/qreasee-view');const point=sheetPoint(event);if(mode&&point)addLayoutView(mode,point);};
 $('#layout-view-title').onchange=event=>{
-  if(layoutSelected?.kind!=='view')return;
+  if(layoutRuntime.selected?.kind!=='view')return;
   const layout=sheetLayout(),title=event.target.value.trim();if(!title)return;
-  saveSheetLayout({...layout,views:layout.views.map(item=>item.id===layoutSelected.id?{...item,title}:item)});
+  saveSheetLayout({...layout,views:layout.views.map(item=>item.id===layoutRuntime.selected.id?{...item,title}:item)});
 };
 $('#layout-view-scale').onchange=event=>{
-  if(layoutSelected?.kind!=='view')return;
+  if(layoutRuntime.selected?.kind!=='view')return;
   const scale=Number(event.target.value);
   if(![25,50,75,100,150,200,500].includes(scale))return;
   const layout=sheetLayout();
-  saveSheetLayout({...layout,views:layout.views.map(item=>item.id===layoutSelected.id?{...item,scale}:item)});
+  saveSheetLayout({...layout,views:layout.views.map(item=>item.id===layoutRuntime.selected.id?{...item,scale}:item)});
 };
 $('#layout-text-value').onchange=event=>{
-  if(layoutSelected?.kind!=='text')return;
+  if(layoutRuntime.selected?.kind!=='text')return;
   const layout=sheetLayout(),value=event.target.value.trim();if(!value)return;
-  saveSheetLayout({...layout,texts:layout.texts.map(item=>item.id===layoutSelected.id?{...item,text:value}:item)});
+  saveSheetLayout({...layout,texts:layout.texts.map(item=>item.id===layoutRuntime.selected.id?{...item,text:value}:item)});
 };
 $('#layout-grid-name').onchange=event=>{
-  if(layoutSelected?.kind!=='grid')return;
-  renameGrid(layoutSelected.id,event.target.value);
+  if(layoutRuntime.selected?.kind!=='grid')return;
+  renameGrid(layoutRuntime.selected.id,event.target.value);
 };
 $('#layout-grid-visibility').onclick=()=>{
-  if(layoutSelected?.kind!=='grid')return;
-  const grid=grids().find(item=>item.id===layoutSelected.id);
+  if(layoutRuntime.selected?.kind!=='grid')return;
+  const grid=grids().find(item=>item.id===layoutRuntime.selected.id);
   if(!grid)return;
   updateGrid(grid.id,{hidden:!grid.hidden});
   $('#layout-grid-visibility').textContent=grid.hidden?'Sembunyikan grid':'Tampilkan grid';
 };
 $('#layout-delete').onclick=()=>{
-  if(!layoutSelected)return;
-  if(layoutSelected.kind==='grid'){removeGrid(layoutSelected.id);return;}
+  if(!layoutRuntime.selected)return;
+  if(layoutRuntime.selected.kind==='grid'){removeGrid(layoutRuntime.selected.id);return;}
   const layout=sheetLayout();
-  const deletingActiveView=layoutSelected.kind==='view'&&layoutSelected.id===layoutActiveViewId;
-  const next=layoutSelected.kind==='view'
-    ?{...layout,views:layout.views.filter(item=>item.id!==layoutSelected.id),
-      gridLines:(layout.gridLines||[]).filter(item=>item.viewId!==layoutSelected.id||item.worldA),
-      texts:layout.texts.filter(item=>item.viewId!==layoutSelected.id),
-      dimensions:layout.dimensions.filter(item=>item.viewId!==layoutSelected.id)}
-    :layoutSelected.kind==='dimension'
-    ?{...layout,dimensions:layout.dimensions.filter(item=>item.id!==layoutSelected.id)}
-    :{...layout,texts:layout.texts.filter(item=>item.id!==layoutSelected.id)};
-  layoutSelected=null;$('#layout-selection').hidden=true;
+  const deletingActiveView=layoutRuntime.selected.kind==='view'&&layoutRuntime.selected.id===layoutRuntime.activeViewId;
+  const next=layoutRuntime.selected.kind==='view'
+    ?{...layout,views:layout.views.filter(item=>item.id!==layoutRuntime.selected.id),
+      gridLines:(layout.gridLines||[]).filter(item=>item.viewId!==layoutRuntime.selected.id||item.worldA),
+      texts:layout.texts.filter(item=>item.viewId!==layoutRuntime.selected.id),
+      dimensions:layout.dimensions.filter(item=>item.viewId!==layoutRuntime.selected.id)}
+    :layoutRuntime.selected.kind==='dimension'
+    ?{...layout,dimensions:layout.dimensions.filter(item=>item.id!==layoutRuntime.selected.id)}
+    :{...layout,texts:layout.texts.filter(item=>item.id!==layoutRuntime.selected.id)};
+  layoutRuntime.selected=null;$('#layout-selection').hidden=true;
   if(deletingActiveView)exitLayoutView();
   saveSheetLayout(next);
 };

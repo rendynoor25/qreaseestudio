@@ -1639,7 +1639,7 @@ canvas.addEventListener('pointerdown',event=>{
 canvas.addEventListener('pointermove',event=>{
   const point=pointer(event);
   const gridHover=!state.drag&&state.tool==='select'?modelGridAt(point):null;
-  if(hoverGridId!==gridHover?.id){hoverGridId=gridHover?.id||null;redraw();}
+  if(layoutRuntime.hoverGridId!==gridHover?.id){layoutRuntime.hoverGridId=gridHover?.id||null;redraw();}
   if (!state.drag && state.tool==='select')
     canvas.style.cursor=commentPinAt(point)||gridHover?'pointer':'';
   const onGround=ground(point);
@@ -1930,7 +1930,7 @@ canvas.addEventListener('pointermove',event=>{
   }
   redraw();
 });
-canvas.addEventListener('pointerleave',()=>{if (!state.layout) state.cursor=null;state.hoverKey=null;state.sectionHover=null;state.offsetHover=null;hoverGridId=null;state.inference=null;redraw();});
+canvas.addEventListener('pointerleave',()=>{if (!state.layout) state.cursor=null;state.hoverKey=null;state.sectionHover=null;state.offsetHover=null;layoutRuntime.hoverGridId=null;state.inference=null;redraw();});
 canvas.addEventListener('dblclick',event=>{
   if (state.tool==='line' && state.linePending) { finishLine(); return; }
   if (!['select','bucket','pull'].includes(state.tool)) return;
