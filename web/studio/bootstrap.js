@@ -49,7 +49,8 @@ const icons = {
   pan:'<path d="M8 13V6a1.5 1.5 0 0 1 3 0v5-7a1.5 1.5 0 0 1 3 0v7-5a1.5 1.5 0 0 1 3 0v6-3a1.5 1.5 0 0 1 3 0v6c0 4-2 6-6 6h-2a5 5 0 0 1-4-2l-4-5a1.6 1.6 0 0 1 2.5-2z"/>',
   download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/>',
   upload:'<path d="M12 17V5m-5 5 5-5 5 5M4 17v4h16v-4"/>',
-  pencil:'<path d="m4 20 4.5-1 11-11a2 2 0 0 0-3-3l-11 11L4 20zM14 7l3 3"/>'
+  pencil:'<path d="m4 20 4.5-1 11-11a2 2 0 0 0-3-3l-11 11L4 20zM14 7l3 3"/>',
+  link:'<path d="M10.5 13.5a4.5 4.5 0 0 0 6.4 0l2.6-2.6a4.5 4.5 0 0 0-6.4-6.4l-1.1 1.1"/><path d="M13.5 10.5a4.5 4.5 0 0 0-6.4 0l-2.6 2.6a4.5 4.5 0 0 0 6.4 6.4l1.1-1.1"/>'
 };
 function icon(element, name) {
   if (!Object.prototype.hasOwnProperty.call(icons,name)) return;

@@ -12,14 +12,17 @@ Login: Google. Gratis selama early access.
 
 Halo rekan-rekan,
 
-Saya sedang mengembangkan *Qreasee Studio* — alat desain 3D yang berjalan langsung di browser, tanpa instalasi.
+Saya sedang mengembangkan *Qreasee Studio* — ruang desain 3D di browser yang menaruh komentar dan revisi langsung di dalam file. Tanpa instalasi.
 
-Alurnya dibuat sederhana:
+Yang paling saya tonjolkan:
 
+- Komentar menempel pada objek, bisa dibalas dan ditandai selesai
+- Kolaborasi real-time lewat satu tautan: rekan bisa mengedit, berkomentar, atau hanya melihat
 - Model 3D, Push/Pull, material, dan bidang potong
 - Lembar Layout A3: denah, tampak, aksonometri, dimensi, dan title block
 - Ekspor DWG dan impor SKP
-- Kolaborasi lewat satu tautan, lengkap dengan komentar
+
+Jadi keputusan desain tidak tercecer di grup chat atau di luar file. Komentar tetap menempel pada objek yang dimaksud, dan status selesainya terlihat oleh tim.
 
 Cocok untuk studi massa, desain konsep, dan presentasi klien.
 Coba gratis selama early access di *https://qreasee.com/* (login Google).
@@ -32,14 +35,18 @@ Saya sangat terbuka dengan masukan, terutama soal alur gambar dan kebutuhan kerj
 
 Halo teman-teman Arsitektur ITB 👋
 
-Saya sedang mengembangkan *Qreasee Studio*, alat desain 3D berbasis browser. Tidak perlu instalasi — cukup buka tautan, login Google, dan langsung menggambar.
+Saya sedang mengembangkan *Qreasee Studio*, ruang desain 3D berbasis browser. Tidak perlu instalasi — cukup buka tautan, login Google, dan langsung menggambar.
 
-Yang sudah bisa dipakai:
+Yang saya tekankan di Qreasee:
 
+• Komentar per objek, bisa dibalas dan ditandai selesai
+• Kolaborasi real-time lewat satu tautan
+• Akses edit, komentar, atau lihat saja
 • Model 3D, Push/Pull, material, dan bidang potong
 • Lembar Layout A3: denah, tampak, aksonometri, dimensi, title block
 • Ekspor DWG dan impor SKP
-• Kolaborasi dan komentar lewat tautan
+
+Jadi revisi tidak perlu tercecer di chat: komentarnya menempel pada objeknya.
 
 Cocok untuk studi massa, konsep desain, dan presentasi ke klien.
 Silakan coba di *https://qreasee.com/* — gratis selama early access.
@@ -52,15 +59,18 @@ Saya sangat terbuka dengan masukan dari teman-teman, terutama soal alur gambar d
 
 Halo rekan-rekan arsitek,
 
-Perkenalkan *Qreasee Studio* — workspace desain 3D berbasis browser untuk mempercepat alur dari ide ke gambar.
+Perkenalkan *Qreasee Studio* — workspace desain 3D berbasis browser yang menaruh komentar dan revisi langsung di dalam file.
 
 Yang bisa dilakukan:
 
+▸ Komentar langsung di file, menempel pada objek
+▸ Balas komentar dan tandai selesai agar revisi tidak hilang
+▸ Kolaborasi real-time lewat satu tautan
+▸ Akses edit, komentar, atau lihat saja
 ▸ Model 3D dan Push/Pull untuk studi massa
 ▸ Material dan bidang potong
 ▸ Lembar A3: denah, tampak, aksonometri, dimensi, dan title block
 ▸ Ekspor DWG, impor SKP
-▸ Kolaborasi dan komentar lewat satu tautan
 
 Tanpa instalasi — cukup browser dan akun Google.
 Coba gratis selama early access di *https://qreasee.com/*
@@ -77,10 +87,14 @@ Saya mengembangkan *Qreasee Studio*, alat bantu desain konsep 3D di browser. Pos
 
 Fitur saat ini:
 
+• Komentar per objek, balasan, dan status selesai
+• Kolaborasi real-time lewat satu tautan
+• Akses edit, komentar, atau lihat saja
 • Model 3D, Push/Pull, material, dan bidang potong
 • Layout A3 dengan title block
 • Ekspor DWG dan impor SKP
-• Kolaborasi lewat tautan dan komentar
+
+Komentar menempel pada objek, jadi keputusan desain tetap berada di file — bukan tercecer di chat.
 
 Coba di *https://qreasee.com/* (login Google, gratis selama early access).
 
@@ -90,9 +104,9 @@ Masukan untuk roadmap — termasuk kebutuhan pertukaran data dan koordinasi deng
 
 ## Varian 4 — Status singkat (untuk WhatsApp Status)
 
-Rancang 3D langsung di browser — sampai lembar A3.
+Rancang bersama. Komentari langsung di file.
 
-Qreasee Studio: model, material, potongan, layout, DWG/SKP.
+Qreasee Studio: komentar per objek, kolaborasi real-time, akses lewat tautan — plus model 3D dan layout A3.
 Coba gratis: https://qreasee.com/
 
 ---
