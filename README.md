@@ -16,11 +16,14 @@ cargo test --locked
 
 ## Pemeriksaan tipe
 
+Lihat [peta kode](ARCHITECTURE.md) untuk alur data, sumber berkas hasil build, dan titik awal saat menelusuri bug.
+
 Kode browser tetap berupa JavaScript dan dimuat langsung oleh server Rust, tanpa langkah kompilasi TypeScript. Pemeriksaan tipe statis memakai TypeScript dengan JSDoc dan `checkJs`:
 
 ```powershell
 npm ci
 npm run check
+npm run verify
 ```
 
 Bentuk data bersama berada di [`web/qreasee-types.d.ts`](web/qreasee-types.d.ts) dan perlu diselaraskan dengan `src/model.rs`, `src/main.rs`, serta RPC Supabase. Kontrol keamanan dan pemetaan OWASP Top 10 dijelaskan di [`SECURITY.md`](SECURITY.md). Konfigurasi saat ini memakai `strict: false`; `strictNullChecks` dapat diaktifkan bertahap setelah bagian yang diperiksa sudah memiliki tipe yang lengkap.
