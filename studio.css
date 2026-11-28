@@ -199,13 +199,20 @@ body{grid-template-rows:56px minmax(0,1fr)}
 .identity{width:43px;height:43px;flex:none;justify-content:center;border-radius:10px;background:#252a32}
 .brand-logo{display:block;width:35px;height:35px;object-fit:contain}
 .brand-logo.light-logo{display:none}
-.project{gap:7px;padding-left:12px;max-width:290px}
+.project{gap:7px;padding-left:12px;max-width:390px}
 .project strong{max-width:165px}
 .history-actions{display:flex;align-items:center;gap:1px;margin-left:7px;padding-left:7px;border-left:1px solid var(--line)}
 .icon-button,.header-tool,.rail-toggle{width:36px;height:36px;min-height:36px;padding:0;flex:none}
 .icon-button svg,.header-tool svg,.rail-toggle svg{width:20px;height:20px}
 .history-actions .icon-button{width:30px;height:30px;min-height:30px}
 .history-actions .icon-button svg{width:20px;height:20px}
+.project-rename{width:24px;height:26px;min-height:26px;padding:0;color:var(--muted);flex:none}
+.project-rename svg{width:14px;height:14px}
+.project-rename:hover{color:var(--brand)}
+.header-action-menu{flex:none}
+.header-action-menu summary{display:grid;place-items:center;list-style:none}
+.header-action-menu .dropdown{left:auto;right:0;z-index:20;min-width:180px}
+#rename-project-dialog .dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 .modes{margin:0 auto}
 .modes button{min-width:76px}
 .collaboration{gap:8px}
@@ -272,9 +279,9 @@ footer #revision{margin-left:auto}
 .unit-control select{height:22px;border:1px solid var(--line);border-radius:4px;background:var(--control);color:var(--text);font-size:11px}
 #coordinates{min-width:110px}
 #connection{font-size:11px}
-@media(max-width:1150px){.header-search{width:110px}.app-header{gap:7px}.project{max-width:220px}.project strong{max-width:110px}}
+@media(max-width:1150px){.header-search{width:110px}.app-header{gap:7px}.project{max-width:320px}.project strong{max-width:110px}}
 @media(max-width:900px){.modes button{min-width:54px}.modes button svg{display:none}.workspace.objects-open{grid-template-columns:var(--rail-width) 190px minmax(0,1fr) 0}.workspace.inspector-open{grid-template-columns:var(--rail-width) 0 minmax(0,1fr) var(--inspector-width)}.workspace.objects-open.inspector-open{grid-template-columns:var(--rail-width) 190px minmax(0,1fr) var(--inspector-width)}#connection{display:none}}
-@media(max-width:760px){.app-header{padding:0 6px;overflow-x:auto}.project{padding-left:5px;max-width:150px}.project>span{display:none}.history-actions{margin-left:0}.header-search{width:80px;min-width:80px}.collaboration{margin-left:auto}.workspace,.workspace.objects-open,.workspace.inspector-open,.workspace.objects-open.inspector-open{grid-template-columns:var(--rail-width) minmax(0,1fr);position:relative}#model-stage,#layout-stage{grid-column:2}.object-panel,.inspector{position:absolute;top:0;bottom:0;z-index:3;width:min(var(--inspector-width),calc(100vw - var(--rail-width)));box-shadow:0 12px 30px #0008}.object-panel{left:var(--rail-width);width:min(260px,calc(100vw - var(--rail-width)))}.inspector{right:0}#coordinates{display:none}}
+@media(max-width:760px){.app-header{padding:0 6px;overflow-x:auto}.project{padding-left:5px;max-width:250px}.project>span{display:none}.history-actions{margin-left:0}.header-search{width:80px;min-width:80px}.collaboration{margin-left:auto}.workspace,.workspace.objects-open,.workspace.inspector-open,.workspace.objects-open.inspector-open{grid-template-columns:var(--rail-width) minmax(0,1fr);position:relative}#model-stage,#layout-stage{grid-column:2}.object-panel,.inspector{position:absolute;top:0;bottom:0;z-index:3;width:min(var(--inspector-width),calc(100vw - var(--rail-width)));box-shadow:0 12px 30px #0008}.object-panel{left:var(--rail-width);width:min(260px,calc(100vw - var(--rail-width)))}.inspector{right:0}#coordinates{display:none}}
 @media(max-width:510px){.workspace,.workspace.objects-open,.workspace.inspector-open,.workspace.objects-open.inspector-open{grid-template-rows:minmax(0,1fr)}.inspector{border-top:0}.modes button{font-size:11px;min-width:42px}.identity{width:35px;height:35px}.brand-logo{width:29px;height:29px}.project strong{max-width:70px}.header-search{width:62px;min-width:62px}.collaboration .share{padding:0 7px;font-size:11px}}
 
 body[data-theme=light]{color-scheme:light;--bg:#e7e9ec;--panel:#ffffff;--control:#edf0f3;--line:#d3d9e1;--muted:#5e6978;--text:#1d2733;--brand-dim:#fff0e4;background:var(--bg)}
