@@ -723,5 +723,9 @@ document.addEventListener('visibilitychange',()=>{
 });
 window.addEventListener('online',()=>{lastSync=Date.now();sync();});
 if (roomFromHash()) openRoom();
-else if (window.qreaseeAuth) window.qreaseeAuth.ready.then(()=>renderProjectHome());
-else renderProjectHome();
+else {
+  renderHomeAccount();
+  if (window.qreaseeAuth) window.qreaseeAuth.ready.then(()=>renderProjectHome())
+    .catch(()=>renderProjectHome());
+  else renderProjectHome();
+}

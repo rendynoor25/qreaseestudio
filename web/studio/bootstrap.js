@@ -631,6 +631,190 @@ function roomFromHash() {
   return /^#[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(location.hash) ? location.hash.slice(1) : '';
 }
 
+const thumbKey=()=> 'qreasee-thumbs:'+(window.qreaseeAuth?.userId || 'local');
+/** @returns {Record<string,{url:string,at:number}>} */
+function projectThumbnails() {
+  try {
+    const value=JSON.parse(localStorage.getItem(thumbKey()) || '{}');
+    if (!value || typeof value!=='object' || Array.isArray(value)) return {};
+    /** @type {Record<string,{url:string,at:number}>} */
+    const safe={};
+    for (const [id,item] of Object.entries(value)) {
+      if (!/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)) continue;
+      const url=typeof item==='string'?item:item?.url;
+      if (typeof url!=='string'||!url.startsWith('data:image/')) continue;
+      safe[id]={url,at:Number(item?.at)||0};
+    }
+    return safe;
+  } catch { return {}; }
+}
+/** @param {string} id @param {string} url */
+function saveProjectThumbnail(id,url) {
+  if (!url) return;
+  const store=projectThumbnails();
+  store[id]={url,at:Date.now()};
+  let entries=Object.entries(store).sort((a,b)=>b[1].at-a[1].at).slice(0,36);
+  for (let attempt=0;attempt<4&&entries.length;attempt++) {
+    try {
+      localStorage.setItem(thumbKey(),JSON.stringify(Object.fromEntries(entries)));
+      return;
+    } catch {
+      entries=entries.slice(0,Math.max(1,Math.ceil(entries.length/2)));
+    }
+  }
+}
+
+let thumbnailTimer=0;
+/** Capture the current model as a fitted perspective snapshot. */
+function captureProjectThumbnail(room=state.room) {
+  if (!room||!state.doc||state.room!==room||state.layout) return;
+  if (state.drag||state.drawPending||state.movePending||state.rotatePending) return;
+  if (!canvas.clientWidth||!canvas.clientHeight) return;
+  const savedCamera={...camera};
+  const selected=[...state.selected];
+  const savedInside=state.inside, savedHover=state.hoverKey;
+  state.selected.clear();
+  state.inside=null;
+  state.hoverKey=null;
+  camera.yaw=.62;
+  camera.pitch=.46;
+  camera.axes=null;
+  camera.perspective=true;
+  fit();
+  draw();
+  const targetWidth=640, targetHeight=400;
+  const sourceWidth=canvas.width, sourceHeight=canvas.height;
+  const sourceRatio=sourceWidth/sourceHeight, targetRatio=targetWidth/targetHeight;
+  let sx=0, sy=0, sw=sourceWidth, sh=sourceHeight;
+  if (sourceRatio>targetRatio) {
+    sw=sourceHeight*targetRatio;
+    sx=(sourceWidth-sw)/2;
+  } else {
+    sh=sourceWidth/targetRatio;
+    sy=(sourceHeight-sh)/2;
+  }
+  const tile=document.createElement('canvas');
+  tile.width=targetWidth;
+  tile.height=targetHeight;
+  const surface=tile.getContext('2d');
+  if (surface&&sw>0&&sh>0) {
+    surface.drawImage(canvas,sx,sy,sw,sh,0,0,targetWidth,targetHeight);
+    try { saveProjectThumbnail(room,tile.toDataURL('image/jpeg',.74)); } catch { /* Storage may be full. */ }
+  }
+  Object.assign(camera,savedCamera);
+  selected.forEach(id=>state.selected.add(id));
+  state.inside=savedInside;
+  state.hoverKey=savedHover;
+  redraw();
+}
+function scheduleThumbnailCapture(delay=1500) {
+  const room=state.room;
+  if (!room) return;
+  clearTimeout(thumbnailTimer);
+  thumbnailTimer=setTimeout(()=>captureProjectThumbnail(room),delay);
+}
+
+/** Draw a deterministic perspective massing preview for projects without a snapshot. */
+function fallbackThumbnail(project) {
+  const seed=[...String(project.id||'')].reduce((sum,letter)=>sum+letter.charCodeAt(0),0);
+  const tint=(seed%3);
+  const accent=tint===0?'#e3a667':tint===1?'#d8b184':'#b9c7c1';
+  const shift=(seed%9)-4;
+  const cos=Math.cos(Math.PI/6), sin=.5;
+  const p=(x,y,z)=>[320+(x-y)*cos, 250+(x+y)*sin-z];
+  const box=(x,y,w,d,h,fill,line)=>{
+    const a=p(x,y,h), b=p(x+w,y,h), c=p(x+w,y+d,h), d2=p(x,y+d,h);
+    const e=p(x+w,y,0), f=p(x+w,y+d,0), g=p(x,y+d,0), h2=p(x,y,0);
+    const pt=point=>point.map(value=>value.toFixed(1)).join(',');
+    return `<g stroke="${line}" stroke-width="1.4" stroke-linejoin="round">`+
+      `<path d="M${pt(a)} L${pt(b)} L${pt(c)} L${pt(d2)} Z" fill="${fill}" fill-opacity=".92"/>`+
+      `<path d="M${pt(d2)} L${pt(c)} L${pt(f)} L${pt(g)} Z" fill="${fill}" fill-opacity=".72"/>`+
+      `<path d="M${pt(b)} L${pt(c)} L${pt(f)} L${pt(e)} Z" fill="${fill}" fill-opacity=".55"/>`+
+      `<path d="M${pt(a)} L${pt(b)} L${pt(e)} L${pt(h2)} L${pt(g)} L${pt(d2)} Z" fill="none" opacity=".55"/>`+
+      `</g>`;
+  };
+  const boxes=[
+    box(18,30,116,92,70,'#33413f','#8fa8a1'),
+    box(122,12,92,84,126,'#3c3a34',accent),
+    box(54,112,158,54,52,'#313c43','#8ea7b2'),
+    box(150,104,78,64 - shift,78,'#3a3f3a','#9bb0a8')
+  ];
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 400" width="640" height="400">`+
+    `<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">`+
+    `<stop offset="0" stop-color="#303b3c"/><stop offset=".55" stop-color="#202829"/>`+
+    `<stop offset="1" stop-color="#141a1c"/></linearGradient>`+
+    `<radialGradient id="glow" cx=".5" cy=".5" r=".5">`+
+    `<stop offset="0" stop-color="${accent}" stop-opacity=".22"/>`+
+    `<stop offset="1" stop-color="${accent}" stop-opacity="0"/></radialGradient></defs>`+
+    `<rect width="640" height="400" fill="url(#bg)"/>`+
+    `<rect width="640" height="400" fill="url(#glow)"/>`+
+    `<g stroke="#ffffff" stroke-opacity=".055" stroke-width="1">`+
+    Array.from({length:11},(_,index)=>`<path d="M0 ${index*40}H640"/>`).join('')+
+    Array.from({length:17},(_,index)=>`<path d="M${index*40} 0V400"/>`).join('')+
+    `</g>`+
+    `<ellipse cx="318" cy="330" rx="238" ry="42" fill="#000" opacity=".18"/>`+
+    `<g transform="translate(${shift} 0)">${boxes.join('')}</g>`+
+    `</svg>`;
+  return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+}
+
+function closeHomeAccount() {
+  const menu=$('#home-account-menu');
+  if (!menu) return;
+  menu.hidden=true;
+  $('#home-account-button')?.setAttribute('aria-expanded','false');
+}
+async function renderHomeAccount() {
+  const holder=$('#home-account');
+  if (!holder) return;
+  const auth=window.qreaseeAuth;
+  if (!auth?.ready) { holder.hidden=true; return; }
+  try { await auth.ready; } catch { holder.hidden=true; return; }
+  if (!auth.userId) { holder.hidden=true; return; }
+  const name=String(auth.displayName||'Akun Google').trim();
+  const email=String(auth.email||'').trim();
+  const avatar=String(auth.avatarUrl||'').trim();
+  const image=$('#home-account-avatar');
+  const initials=$('#home-account-initials');
+  const label=$('#home-account-name');
+  if (!image||!initials||!label) return;
+  label.textContent=name;
+  initials.textContent=name.split(/\s+/).slice(0,2).map(word=>[...word][0]||'').join('').toUpperCase()||'Q';
+  image.hidden=true;
+  initials.hidden=false;
+  if (avatar) {
+    image.onerror=()=>{ image.hidden=true; initials.hidden=false; };
+    image.onload=()=>{ image.hidden=false; initials.hidden=true; };
+    image.src=avatar;
+    image.alt='';
+  }
+  const accountEmail=$('#home-account-email');
+  if (accountEmail) accountEmail.textContent=email||name;
+  holder.hidden=false;
+  closeHomeAccount();
+}
+$('#home-account-button')?.addEventListener('click',event=>{
+  event.stopPropagation();
+  const menu=$('#home-account-menu');
+  if (!menu) return;
+  menu.hidden=!menu.hidden;
+  $('#home-account-button')?.setAttribute('aria-expanded',String(!menu.hidden));
+});
+$('#home-sign-out')?.addEventListener('click',async()=>{
+  const button=$('#home-sign-out');
+  button.disabled=true;
+  try { await window.qreaseeAuth.signOut(); }
+  catch (error) { button.disabled=false; showStatus(error.message||'Gagal keluar.'); }
+});
+document.addEventListener('pointerdown',event=>{
+  const target=/** @type {Node} */ (event.target);
+  if (!$('#home-account')?.contains(target)) closeHomeAccount();
+});
+window.addEventListener('pagehide',()=>{
+  clearTimeout(thumbnailTimer);
+  captureProjectThumbnail();
+});
+
 const recentKey=()=> 'qreasee-recent:'+(window.qreaseeAuth?.userId || 'local');
 function recentProjects() {
   let local=[];
@@ -649,8 +833,10 @@ function recentProjects() {
 }
 function renderProjectHome() {
   const list=$('#home-projects');
+  if (!list) return;
   list.replaceChildren();
-  $('#home-storage-note').textContent=window.qreaseeAuth?.userId
+  const note=$('#home-storage-note');
+  if (note) note.textContent=window.qreaseeAuth?.userId
     ? 'Tersimpan pada akun Google Anda' : 'Tersimpan di browser ini';
   const projects=recentProjects();
   if (!projects.length) {
@@ -661,26 +847,45 @@ function renderProjectHome() {
     list.append(empty);
     return;
   }
+  const thumbs=projectThumbnails();
+  const dateFormat=/** @type {Intl.DateTimeFormatOptions} */ ({day:'numeric',month:'short',year:'numeric'});
   for (const project of projects) {
     const card=document.createElement('button');
     card.type='button';card.className='home-project-card';
+    card.title=project.title || 'Proyek tanpa judul';
     const art=document.createElement('span');art.className='home-project-art';
+    const image=document.createElement('img');
+    image.alt='';
+    image.loading='lazy';
+    image.decoding='async';
+    image.draggable=false;
+    const snapshot=thumbs[project.id]?.url;
+    image.src=snapshot || fallbackThumbnail(project);
+    if (!snapshot) art.classList.add('is-fallback');
+    art.append(image);
     const info=document.createElement('span');info.className='home-project-info';
     const title=document.createElement('strong');title.textContent=project.title || 'Proyek tanpa judul';
     const meta=document.createElement('small');
-    meta.textContent='Terakhir dibuka '+new Date(project.updatedAt).toLocaleDateString('id-ID',
-      {day:'numeric',month:'long',year:'numeric'});
+    meta.textContent=project.updatedAt
+      ? 'Terakhir dibuka '+new Date(project.updatedAt).toLocaleDateString('id-ID',dateFormat)
+      : 'Belum dibuka di perangkat ini';
     info.append(title,meta);card.append(art,info);
     card.onclick=()=>{history.replaceState(null,'','#'+project.id);openRoom();};
     list.append(card);
   }
 }
 function showProjectHome() {
+  captureProjectThumbnail();
+  clearTimeout(thumbnailTimer);
   ++state.epoch;
   state.room='';
   history.replaceState(null,'',location.pathname);
   document.body.classList.add('landing');
   renderProjectHome();
+  renderHomeAccount();
+  if (window.qreaseeAuth) window.qreaseeAuth.ready.then(()=>{
+    if (!state.room && document.body.classList.contains('landing')) renderProjectHome();
+  }).catch(()=>{});
 }
 let rememberTimer;
 function rememberProject() {
@@ -688,6 +893,7 @@ function rememberProject() {
   const project={id:state.room,title:state.doc.sheet.title || 'Proyek tanpa judul',updatedAt:Date.now()};
   const projects=[project,...recentProjects().filter(item=>item.id!==project.id)].slice(0,30);
   localStorage.setItem(recentKey(),JSON.stringify(projects));
+  scheduleThumbnailCapture();
   clearTimeout(rememberTimer);
   if (window.qreaseeAuth?.rememberProject) {
     rememberTimer=setTimeout(()=>window.qreaseeAuth.rememberProject(project).catch(()=>{}),1200);
@@ -695,6 +901,8 @@ function rememberProject() {
 }
 
 async function openRoom(createBlank) {
+  captureProjectThumbnail();
+  clearTimeout(thumbnailTimer);
   const epoch = ++state.epoch;
   layoutRuntime.selectedGridId=null;
   if (window.qreaseeAuth) {
@@ -794,6 +1002,7 @@ function accept(data) {
     }
     refresh(first);
     if (first || oldTitle!==state.doc.sheet.title) rememberProject();
+    scheduleThumbnailCapture(2100);
   }
   const avatars = $('#avatars');
   const peers = [...(data.peers || [])].sort((a,b) => Number(b.id === state.client) - Number(a.id === state.client));

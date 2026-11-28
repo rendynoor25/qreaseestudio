@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co; object-src 'none'; base-uri 'none'; form-action 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.googleusercontent.com https://*.ggpht.com; connect-src 'self' https://*.supabase.co; object-src 'none'; base-uri 'none'; form-action 'self';">
   <title>Qreasee — Rancang 3D sampai lembar A3</title>
   <meta name="description" content="Model 3D, material, potongan, dan layout A3 langsung di browser. Tanpa instalasi, login Google, dan kolaborasi lewat tautan. Coba gratis di qreasee.com.">
   <meta name="theme-color" content="#0b1015">
@@ -37,17 +37,37 @@
     <header class="home-header">
       <div class="home-brand" aria-label="Qreasee"><img class="dark-logo" src="./qreasee-logo.png" alt="Qreasee"><img class="light-logo" src="./qreasee-logo-black.png" alt="" aria-hidden="true"></div>
       <span class="home-header-label">Ruang kerja desain</span>
-      <button id="home-theme" class="home-theme" type="button" aria-label="Ganti tema">◐ <span>Tampilan</span></button>
+      <div class="home-header-actions">
+        <button id="home-theme" class="home-theme" type="button" aria-label="Ganti tema">◐ <span>Tampilan</span></button>
+        <div id="home-account" class="home-account" hidden>
+          <button id="home-account-button" class="home-account-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Menu akun">
+            <img id="home-account-avatar" class="home-account-avatar" alt="" hidden>
+            <span id="home-account-initials" class="home-account-initials" aria-hidden="true"></span>
+            <span id="home-account-name" class="home-account-name"></span>
+          </button>
+          <div id="home-account-menu" class="home-account-menu" role="menu" hidden>
+            <span class="home-account-menu-label">Masuk sebagai</span>
+            <strong id="home-account-email"></strong>
+            <button id="home-sign-out" type="button" role="menuitem">Keluar dari akun</button>
+          </div>
+        </div>
+      </div>
     </header>
     <div class="home-content">
-      <div class="home-intro"><p class="home-eyebrow">SELAMAT DATANG DI QREASEE</p><h1 id="home-title">Ruang untuk ide<br><em>menjadi nyata.</em></h1><p>Mulai model baru atau lanjutkan proyek yang sudah Anda kerjakan. Semua alat gambar dan kolaborasi ada di satu ruang kerja.</p></div>
-      <div class="home-hero-actions">
-        <button id="home-new" class="home-new" type="button"><span class="home-action-icon">＋</span><span><strong>Proyek baru</strong><small>Mulai dari kanvas kosong</small></span></button>
-        <button id="home-example" class="home-example" type="button"><span class="home-action-icon">▧</span><span><strong>Buka contoh</strong><small>Jelajahi model awal Qreasee</small></span></button>
+      <div class="home-layout">
+        <div class="home-left">
+          <div class="home-intro"><p class="home-eyebrow">SELAMAT DATANG DI QREASEE</p><h1 id="home-title">Ruang untuk ide<br><em>menjadi nyata.</em></h1><p>Mulai model baru atau lanjutkan proyek yang sudah Anda kerjakan. Semua alat gambar dan kolaborasi ada di satu ruang kerja.</p></div>
+          <div class="home-hero-actions">
+            <button id="home-new" class="home-new" type="button"><span class="home-action-icon">＋</span><span><strong>Proyek baru</strong><small>Mulai dari kanvas kosong</small></span></button>
+            <button id="home-example" class="home-example" type="button"><span class="home-action-icon">▧</span><span><strong>Buka contoh</strong><small>Jelajahi model awal Qreasee</small></span></button>
+          </div>
+          <p id="home-message" class="home-message" role="status"></p>
+        </div>
+        <section class="home-projects-panel" aria-labelledby="home-recent-title">
+          <div class="home-section-head"><div><p class="home-eyebrow">PROYEK ANDA</p><h2 id="home-recent-title">Terakhir dibuka</h2></div><span id="home-storage-note">Tersimpan di browser ini</span></div>
+          <div id="home-projects" class="home-projects"></div>
+        </section>
       </div>
-      <p id="home-message" class="home-message" role="status"></p>
-      <div class="home-section-head"><div><p class="home-eyebrow">PROYEK ANDA</p><h2>Terakhir dibuka</h2></div><span id="home-storage-note">Tersimpan di browser ini</span></div>
-      <div id="home-projects" class="home-projects"></div>
     </div>
     <footer class="home-footer"><span>Qreasee · Model bersama, lebih mudah.</span><span>Model 3D &amp; gambar teknik</span></footer>
   </section>

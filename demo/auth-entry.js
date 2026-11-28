@@ -94,6 +94,13 @@ window.qreaseeAuth = {
   get displayName() {
     return currentUser?.user_metadata?.full_name || currentUser?.email || 'Akun Google';
   },
+  get avatarUrl() {
+    const meta=currentUser?.user_metadata;
+    return meta?.avatar_url || meta?.picture || '';
+  },
+  get email() {
+    return currentUser?.email || '';
+  },
   async signOut() {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;

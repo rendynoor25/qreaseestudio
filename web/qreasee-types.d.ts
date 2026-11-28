@@ -295,6 +295,8 @@ interface Window {
     readonly recentProjects: Array<{ id: string; title: string; updatedAt: number }>;
     rememberProject(project: { id: string; title: string; updatedAt: number }): Promise<void>;
     readonly displayName: string;
+    readonly avatarUrl: string;
+    readonly email: string;
     signOut(): Promise<void>;
   };
 }
