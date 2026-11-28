@@ -5847,8 +5847,9 @@ function gridBaseSegment(grid,view) {
 function gridSegment(grid,view) {
   const segment=gridBaseSegment(grid,view);
   if(!segment)return null;
-  if(layoutRuntime.drag?.kind==='grid'&&layoutRuntime.drag.id===grid.id&&layoutRuntime.drag.viewId===view.id)
-    return segment.map(([x,y])=>[x+layoutRuntime.drag.dx,y+layoutRuntime.drag.dy]);
+  const drag=layoutRuntime.drag;
+  if(drag?.kind==='grid'&&drag.id===grid.id&&drag.viewId===view.id)
+    return segment.map(([x,y])=>[x+drag.dx,y+drag.dy]);
   return segment;
 }
 function modelGridHeight() {
@@ -6312,7 +6313,7 @@ $('#sheet').addEventListener('pointerdown',event=>{
     const source=kind==='view'?sheetLayout().views.find(item=>item.id===id)
       :sheetLayout().texts.find(item=>item.id===id);
     if(!source)return;
-    layoutRuntime.drag={kind,id,start:point,x:source.x,y:source.y};
+    layoutRuntime.drag={kind:kind==='view'?'view':'text',id,start:point,x:source.x,y:source.y};
     event.currentTarget.setPointerCapture(event.pointerId);
   } else if(point[1]>=254) {
     $('.layout-title-details').open=true;

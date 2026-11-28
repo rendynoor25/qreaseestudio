@@ -25,4 +25,4 @@
 | Dua pengguna melihat revisi berbeda | `demo/cloud.js`, RPC Supabase, lalu operasi revisi di `src/main.rs` |
 | SKP/DWG gagal | `web/skp-import.ts` atau `web/cad-export.ts`, lalu build dan pemeriksaan hasil `.js` |
 
-Langkah berikutnya adalah memindahkan fungsi lintas fitur ke ekspor dan impor modul TypeScript yang eksplisit, lalu menghapus `any` sementara pada operasi drag Layout. Pertahankan satu pemilik state dokumen dan satu jalur operasi edit saat melakukannya.
+Langkah berikutnya adalah memindahkan fungsi lintas fitur ke ekspor dan impor modul TypeScript yang eksplisit. Pertahankan satu pemilik state dokumen dan satu jalur operasi edit saat melakukannya.
